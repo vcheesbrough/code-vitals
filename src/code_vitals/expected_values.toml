@@ -1,0 +1,771 @@
+# Expected measure values at fixed trunk commits of each measured repo.
+#
+# Checked after every deployment's collect (`code-vitals check-repo`,
+# src/code_vitals/checks.py). A commit never changes, so neither may its
+# values: a change that alters them bumps the measure's version (or the repo's
+# area ruleset), and updates this table in the same PR, so every change in
+# numbers is reviewed. On a mismatch, check-repo prints the recorded entries in
+# this format, ready to review and paste.
+#
+# [<repo>]                         ruleset = the area ruleset version written for
+# [<repo>.commits.<sha>.<measure>] version = the measure version written for,
+#                                  then one value per row: "<area>/<facet>",
+#                                  "-" for no area, no "/<facet>" when unsplit.
+# Every recomputable registered measure is listed at every commit, even with
+# no values; a non-recomputable one cannot be pinned (checks.fixed_value_measures).
+
+[v-note]
+ruleset = 1
+
+# 2026-07-21 Iteration 16: pen preset picker and whole-stroke eraser (#17)
+[v-note.commits.e7ca58739fb2934935e64259a70a02536340ae80.files]
+version = 1
+"-" = 159
+
+[v-note.commits.e7ca58739fb2934935e64259a70a02536340ae80.lines_of_code]
+version = 1
+"android/Batch" = 73
+"android/Kotlin" = 3045
+"android/Prolog" = 1
+"android/Shell" = 107
+"android/XML" = 48
+"server/Rust" = 2869
+"server/SQL" = 134
+"server/TOML" = 48
+"tests/JSON" = 179
+"tests/Kotlin" = 1949
+"tests/Rust" = 541
+"tests/SQL" = 50
+"tests/TypeScript" = 1029
+"tests/YAML" = 207
+"tooling/Dockerfile" = 87
+"tooling/JSON" = 459
+"tooling/Just" = 55
+"tooling/Markdown" = 79
+"tooling/Shell" = 579
+"tooling/TOML" = 14
+"tooling/YAML" = 691
+"web/CSS" = 373
+"web/HTML" = 13
+"web/Rust" = 772
+"web/TOML" = 19
+
+[v-note.commits.e7ca58739fb2934935e64259a70a02536340ae80.source_files]
+version = 1
+"android/Batch" = 1
+"android/Kotlin" = 14
+"android/Prolog" = 1
+"android/Shell" = 1
+"android/XML" = 3
+"server/Rust" = 10
+"server/SQL" = 6
+"server/TOML" = 2
+"tests/JSON" = 19
+"tests/Kotlin" = 13
+"tests/Rust" = 3
+"tests/SQL" = 1
+"tests/TypeScript" = 8
+"tests/YAML" = 2
+"tooling/Dockerfile" = 3
+"tooling/JSON" = 18
+"tooling/Just" = 1
+"tooling/Markdown" = 8
+"tooling/Shell" = 12
+"tooling/TOML" = 2
+"tooling/YAML" = 6
+"web/CSS" = 1
+"web/HTML" = 1
+"web/Rust" = 1
+"web/TOML" = 2
+
+[v-note.commits.e7ca58739fb2934935e64259a70a02536340ae80.nloc]
+version = 1
+"android" = 3045
+"server" = 3016
+"tests" = 3569
+"web" = 772
+
+[v-note.commits.e7ca58739fb2934935e64259a70a02536340ae80.functions]
+version = 1
+"android" = 146
+"server" = 103
+"tests" = 243
+"web" = 29
+
+[v-note.commits.e7ca58739fb2934935e64259a70a02536340ae80.complexity_total]
+version = 1
+"android" = 320
+"server" = 341
+"tests" = 335
+"web" = 148
+
+[v-note.commits.e7ca58739fb2934935e64259a70a02536340ae80.functions_over_10]
+version = 1
+"android" = 0
+"server" = 5
+"tests" = 0
+"web" = 4
+
+[v-note.commits.e7ca58739fb2934935e64259a70a02536340ae80.max_function_complexity]
+version = 1
+"android" = 10
+"server" = 24
+"tests" = 9
+"web" = 42
+
+[v-note.commits.e7ca58739fb2934935e64259a70a02536340ae80.function_complexity]
+version = 1
+
+[v-note.commits.e7ca58739fb2934935e64259a70a02536340ae80.lines_added]
+version = 1
+"android" = 902
+"server" = 574
+"tests" = 1356
+"tooling" = 46
+"web" = 11
+
+[v-note.commits.e7ca58739fb2934935e64259a70a02536340ae80.lines_deleted]
+version = 1
+"android" = 72
+"server" = 80
+"tests" = 52
+"tooling" = 25
+"web" = 2
+
+[v-note.commits.e7ca58739fb2934935e64259a70a02536340ae80.files_changed]
+version = 1
+"android" = 6
+"server" = 7
+"tests" = 17
+"tooling" = 8
+"web" = 1
+
+[v-note.commits.e7ca58739fb2934935e64259a70a02536340ae80.operations]
+version = 1
+"server/http_route" = 15
+
+[v-note.commits.e7ca58739fb2934935e64259a70a02536340ae80.e2e_scenarios]
+version = 1
+"tests/android-instrumented" = 20
+"tests/rust-integration" = 20
+"tests/web-e2e" = 29
+
+# 2026-10-19 Iteration 69 — Android pen input and instrumented-test hygiene (#465, #464, #390) (#72)
+[v-note.commits.4252172cf004a8bf5ae00a038dfcf91a2bec37d0.files]
+version = 1
+"-" = 343
+
+[v-note.commits.4252172cf004a8bf5ae00a038dfcf91a2bec37d0.lines_of_code]
+version = 1
+"android/Batch" = 64
+"android/Kotlin" = 6133
+"android/Prolog" = 1
+"android/Shell" = 103
+"android/XML" = 72
+"android/YAML" = 24
+"server/Rust" = 7447
+"server/SQL" = 223
+"server/TOML" = 68
+"tests/JSON" = 1000
+"tests/Kotlin" = 7421
+"tests/Rust" = 7113
+"tests/SQL" = 50
+"tests/TypeScript" = 4144
+"tests/YAML" = 483
+"tooling/Dockerfile" = 91
+"tooling/JSON" = 2586
+"tooling/Just" = 65
+"tooling/Markdown" = 132
+"tooling/Plain Text" = 0
+"tooling/Shell" = 3673
+"tooling/TOML" = 25
+"tooling/YAML" = 840
+"web/CSS" = 380
+"web/HTML" = 14
+"web/Rust" = 3453
+"web/SVG" = 4
+"web/TOML" = 23
+
+[v-note.commits.4252172cf004a8bf5ae00a038dfcf91a2bec37d0.source_files]
+version = 1
+"android/Batch" = 1
+"android/Kotlin" = 58
+"android/Prolog" = 1
+"android/Shell" = 1
+"android/XML" = 6
+"android/YAML" = 1
+"server/Rust" = 18
+"server/SQL" = 9
+"server/TOML" = 2
+"tests/JSON" = 26
+"tests/Kotlin" = 48
+"tests/Rust" = 22
+"tests/SQL" = 1
+"tests/TypeScript" = 20
+"tests/YAML" = 4
+"tooling/Dockerfile" = 3
+"tooling/JSON" = 21
+"tooling/Just" = 1
+"tooling/Markdown" = 9
+"tooling/Plain Text" = 3
+"tooling/Shell" = 35
+"tooling/TOML" = 4
+"tooling/YAML" = 9
+"web/CSS" = 1
+"web/HTML" = 1
+"web/Rust" = 11
+"web/SVG" = 1
+"web/TOML" = 2
+
+[v-note.commits.4252172cf004a8bf5ae00a038dfcf91a2bec37d0.nloc]
+version = 1
+"android" = 6130
+"server" = 7742
+"tests" = 18716
+"web" = 3457
+
+[v-note.commits.4252172cf004a8bf5ae00a038dfcf91a2bec37d0.functions]
+version = 1
+"android" = 388
+"server" = 368
+"tests" = 1357
+"web" = 213
+
+[v-note.commits.4252172cf004a8bf5ae00a038dfcf91a2bec37d0.complexity_total]
+version = 1
+"android" = 799
+"server" = 877
+"tests" = 2012
+"web" = 565
+
+[v-note.commits.4252172cf004a8bf5ae00a038dfcf91a2bec37d0.functions_over_10]
+version = 1
+"android" = 1
+"server" = 7
+"tests" = 5
+"web" = 6
+
+[v-note.commits.4252172cf004a8bf5ae00a038dfcf91a2bec37d0.max_function_complexity]
+version = 1
+"android" = 11
+"server" = 17
+"tests" = 19
+"web" = 19
+
+[v-note.commits.4252172cf004a8bf5ae00a038dfcf91a2bec37d0.function_complexity]
+version = 1
+
+[v-note.commits.4252172cf004a8bf5ae00a038dfcf91a2bec37d0.lines_added]
+version = 1
+"android" = 1115
+"tests" = 1602
+"tooling" = 18
+
+[v-note.commits.4252172cf004a8bf5ae00a038dfcf91a2bec37d0.lines_deleted]
+version = 1
+"android" = 514
+"tests" = 44
+"tooling" = 4
+
+[v-note.commits.4252172cf004a8bf5ae00a038dfcf91a2bec37d0.files_changed]
+version = 1
+"android" = 19
+"tests" = 19
+"tooling" = 4
+
+[v-note.commits.4252172cf004a8bf5ae00a038dfcf91a2bec37d0.operations]
+version = 1
+"server/http_route" = 16
+
+[v-note.commits.4252172cf004a8bf5ae00a038dfcf91a2bec37d0.e2e_scenarios]
+version = 1
+"tests/android-instrumented" = 76
+"tests/live-smoke" = 6
+"tests/rust-integration" = 80
+"tests/web-e2e" = 90
+
+[bored]
+ruleset = 1
+
+# 2026-04-20 feat: iteration 14 — automated UI testing with Playwright (#15)
+[bored.commits.1d440d45291101062950bf8e463f4e9e28a871aa.files]
+version = 1
+"-" = 72
+
+[bored.commits.1d440d45291101062950bf8e463f4e9e28a871aa.lines_of_code]
+version = 1
+"backend/Rust" = 1895
+"backend/TOML" = 29
+"shared/Rust" = 377
+"shared/TOML" = 22
+"tests/JSON" = 10
+"tests/TypeScript" = 562
+"tests/YAML" = 30
+"tooling/Dockerfile" = 43
+"tooling/JavaScript" = 123
+"tooling/Markdown" = 231
+"tooling/TOML" = 9
+"tooling/YAML" = 148
+"web/CSS" = 773
+"web/HTML" = 10
+"web/Rust" = 1812
+"web/TOML" = 22
+
+[bored.commits.1d440d45291101062950bf8e463f4e9e28a871aa.source_files]
+version = 1
+"backend/Rust" = 9
+"backend/TOML" = 1
+"shared/Rust" = 3
+"shared/TOML" = 2
+"tests/JSON" = 1
+"tests/TypeScript" = 8
+"tests/YAML" = 1
+"tooling/Dockerfile" = 1
+"tooling/JavaScript" = 1
+"tooling/Markdown" = 3
+"tooling/TOML" = 2
+"tooling/YAML" = 3
+"web/CSS" = 1
+"web/HTML" = 1
+"web/Rust" = 14
+"web/TOML" = 2
+
+[bored.commits.1d440d45291101062950bf8e463f4e9e28a871aa.nloc]
+version = 1
+"backend" = 1895
+"shared" = 377
+"tests" = 562
+"tooling" = 123
+"web" = 1812
+
+[bored.commits.1d440d45291101062950bf8e463f4e9e28a871aa.functions]
+version = 1
+"backend" = 69
+"shared" = 19
+"tests" = 50
+"tooling" = 13
+"web" = 29
+
+[bored.commits.1d440d45291101062950bf8e463f4e9e28a871aa.complexity_total]
+version = 1
+"backend" = 186
+"shared" = 48
+"tests" = 60
+"tooling" = 44
+"web" = 277
+
+[bored.commits.1d440d45291101062950bf8e463f4e9e28a871aa.functions_over_10]
+version = 1
+"backend" = 2
+"shared" = 0
+"tests" = 0
+"tooling" = 1
+"web" = 5
+
+[bored.commits.1d440d45291101062950bf8e463f4e9e28a871aa.max_function_complexity]
+version = 1
+"backend" = 19
+"shared" = 3
+"tests" = 5
+"tooling" = 11
+"web" = 53
+
+[bored.commits.1d440d45291101062950bf8e463f4e9e28a871aa.function_complexity]
+version = 1
+
+[bored.commits.1d440d45291101062950bf8e463f4e9e28a871aa.lines_added]
+version = 1
+"tests" = 849
+"tooling" = 14
+
+[bored.commits.1d440d45291101062950bf8e463f4e9e28a871aa.lines_deleted]
+version = 1
+"tests" = 0
+"tooling" = 1
+
+[bored.commits.1d440d45291101062950bf8e463f4e9e28a871aa.files_changed]
+version = 1
+"tests" = 12
+"tooling" = 2
+
+[bored.commits.1d440d45291101062950bf8e463f4e9e28a871aa.operations]
+version = 1
+"backend/http_route" = 19
+"shared/mcp_tool" = 12
+
+[bored.commits.1d440d45291101062950bf8e463f4e9e28a871aa.e2e_scenarios]
+version = 1
+"tests/web-e2e" = 31
+
+# 2026-10-20 fix(deploy): private network name sorts after proxy-backend (#473) (#91)
+[bored.commits.6a8f383cc574089fecc873883ae30eac4c7b13e2.files]
+version = 1
+"-" = 206
+
+[bored.commits.6a8f383cc574089fecc873883ae30eac4c7b13e2.lines_of_code]
+version = 1
+"backend/Rust" = 9541
+"backend/SQL" = 107
+"backend/TOML" = 80
+"shared/Rust" = 2551
+"shared/TOML" = 30
+"tests/JSON" = 10
+"tests/Rust" = 8346
+"tests/TypeScript" = 5082
+"tests/YAML" = 255
+"tooling/Dockerfile" = 135
+"tooling/JavaScript" = 123
+"tooling/Markdown" = 20
+"tooling/Plain Text" = 0
+"tooling/Python" = 177
+"tooling/Shell" = 1931
+"tooling/TOML" = 30
+"tooling/YAML" = 877
+"web/CSS" = 1760
+"web/HTML" = 11
+"web/Rust" = 10281
+"web/SVG" = 9
+"web/TOML" = 51
+
+[bored.commits.6a8f383cc574089fecc873883ae30eac4c7b13e2.source_files]
+version = 1
+"backend/Rust" = 34
+"backend/SQL" = 2
+"backend/TOML" = 1
+"shared/Rust" = 9
+"shared/TOML" = 2
+"tests/JSON" = 1
+"tests/Rust" = 20
+"tests/TypeScript" = 26
+"tests/YAML" = 3
+"tooling/Dockerfile" = 1
+"tooling/JavaScript" = 1
+"tooling/Markdown" = 5
+"tooling/Plain Text" = 1
+"tooling/Python" = 1
+"tooling/Shell" = 28
+"tooling/TOML" = 3
+"tooling/YAML" = 5
+"web/CSS" = 1
+"web/HTML" = 1
+"web/Rust" = 36
+"web/SVG" = 1
+"web/TOML" = 2
+
+[bored.commits.6a8f383cc574089fecc873883ae30eac4c7b13e2.nloc]
+version = 1
+"backend" = 9684
+"shared" = 2555
+"tests" = 13442
+"tooling" = 283
+"web" = 10320
+
+[bored.commits.6a8f383cc574089fecc873883ae30eac4c7b13e2.functions]
+version = 1
+"backend" = 470
+"shared" = 214
+"tests" = 884
+"tooling" = 19
+"web" = 558
+
+[bored.commits.6a8f383cc574089fecc873883ae30eac4c7b13e2.complexity_total]
+version = 1
+"backend" = 1468
+"shared" = 475
+"tests" = 1365
+"tooling" = 89
+"web" = 1511
+
+[bored.commits.6a8f383cc574089fecc873883ae30eac4c7b13e2.functions_over_10]
+version = 1
+"backend" = 21
+"shared" = 3
+"tests" = 5
+"tooling" = 2
+"web" = 16
+
+[bored.commits.6a8f383cc574089fecc873883ae30eac4c7b13e2.max_function_complexity]
+version = 1
+"backend" = 44
+"shared" = 18
+"tests" = 27
+"tooling" = 30
+"web" = 84
+
+[bored.commits.6a8f383cc574089fecc873883ae30eac4c7b13e2.function_complexity]
+version = 1
+
+[bored.commits.6a8f383cc574089fecc873883ae30eac4c7b13e2.lines_added]
+version = 1
+"tooling" = 75
+
+[bored.commits.6a8f383cc574089fecc873883ae30eac4c7b13e2.lines_deleted]
+version = 1
+"tooling" = 1
+
+[bored.commits.6a8f383cc574089fecc873883ae30eac4c7b13e2.files_changed]
+version = 1
+"tooling" = 4
+
+[bored.commits.6a8f383cc574089fecc873883ae30eac4c7b13e2.operations]
+version = 1
+"backend/http_route" = 34
+"shared/mcp_tool" = 20
+
+[bored.commits.6a8f383cc574089fecc873883ae30eac4c7b13e2.e2e_scenarios]
+version = 1
+"tests/web-e2e" = 200
+
+[sovereign-config]
+ruleset = 1
+
+# 2026-08-09 Attempt to add certs (#18)
+[sovereign-config.commits.619381badc8ecefe70f5a48b5fd60f7c740395e1.files]
+version = 1
+"-" = 122
+
+[sovereign-config.commits.619381badc8ecefe70f5a48b5fd60f7c740395e1.lines_of_code]
+version = 1
+"libraries/Markdown" = 39
+"libraries/Protocol Buffers" = 173
+"libraries/Rust" = 6080
+"libraries/TOML" = 157
+"libraries/YAML" = 6
+"server/Markdown" = 0
+"server/Rust" = 11134
+"server/SQL" = 114
+"server/TOML" = 73
+"tests/JSON" = 24
+"tests/JavaScript" = 1599
+"tests/Rust" = 5544
+"tests/TOML" = 31
+"tooling/Dockerfile" = 73
+"tooling/Markdown" = 6
+"tooling/Shell" = 263
+"tooling/TOML" = 65
+"tooling/YAML" = 809
+"web/CSS" = 179
+"web/HTML" = 262
+"web/Rust" = 3638
+"web/TOML" = 58
+
+[sovereign-config.commits.619381badc8ecefe70f5a48b5fd60f7c740395e1.source_files]
+version = 1
+"libraries/Markdown" = 1
+"libraries/Protocol Buffers" = 1
+"libraries/Rust" = 28
+"libraries/TOML" = 7
+"libraries/YAML" = 1
+"server/Markdown" = 1
+"server/Rust" = 22
+"server/SQL" = 8
+"server/TOML" = 2
+"tests/JSON" = 2
+"tests/JavaScript" = 2
+"tests/Rust" = 14
+"tests/TOML" = 2
+"tooling/Dockerfile" = 1
+"tooling/Markdown" = 2
+"tooling/Shell" = 3
+"tooling/TOML" = 1
+"tooling/YAML" = 4
+"web/CSS" = 1
+"web/HTML" = 1
+"web/Rust" = 1
+"web/TOML" = 2
+
+[sovereign-config.commits.619381badc8ecefe70f5a48b5fd60f7c740395e1.nloc]
+version = 1
+"libraries" = 6134
+"server" = 11235
+"tests" = 7144
+"web" = 3638
+
+[sovereign-config.commits.619381badc8ecefe70f5a48b5fd60f7c740395e1.functions]
+version = 1
+"libraries" = 371
+"server" = 457
+"tests" = 411
+"web" = 163
+
+[sovereign-config.commits.619381badc8ecefe70f5a48b5fd60f7c740395e1.complexity_total]
+version = 1
+"libraries" = 1140
+"server" = 1306
+"tests" = 723
+"web" = 812
+
+[sovereign-config.commits.619381badc8ecefe70f5a48b5fd60f7c740395e1.functions_over_10]
+version = 1
+"libraries" = 13
+"server" = 21
+"tests" = 3
+"web" = 12
+
+[sovereign-config.commits.619381badc8ecefe70f5a48b5fd60f7c740395e1.max_function_complexity]
+version = 1
+"libraries" = 46
+"server" = 40
+"tests" = 37
+"web" = 58
+
+[sovereign-config.commits.619381badc8ecefe70f5a48b5fd60f7c740395e1.function_complexity]
+version = 1
+
+[sovereign-config.commits.619381badc8ecefe70f5a48b5fd60f7c740395e1.lines_added]
+version = 1
+"tooling" = 13
+
+[sovereign-config.commits.619381badc8ecefe70f5a48b5fd60f7c740395e1.lines_deleted]
+version = 1
+"tooling" = 3
+
+[sovereign-config.commits.619381badc8ecefe70f5a48b5fd60f7c740395e1.files_changed]
+version = 1
+"tooling" = 2
+
+[sovereign-config.commits.619381badc8ecefe70f5a48b5fd60f7c740395e1.operations]
+version = 1
+"libraries/grpc_method" = 14
+"libraries/mcp_tool" = 16
+"server/http_route" = 13
+
+[sovereign-config.commits.619381badc8ecefe70f5a48b5fd60f7c740395e1.e2e_scenarios]
+version = 1
+"tests/browser" = 42
+"tests/rust-integration" = 78
+
+# 2026-10-19 Iteration 46 — Audit trail counts and actor filter, via protocol v5 (#483)
+[sovereign-config.commits.7b70e7923331cff9eeb103e014eb6b146975cc52.files]
+version = 1
+"-" = 302
+
+[sovereign-config.commits.7b70e7923331cff9eeb103e014eb6b146975cc52.lines_of_code]
+version = 1
+"libraries/Markdown" = 39
+"libraries/Protocol Buffers" = 634
+"libraries/Rust" = 11563
+"libraries/TOML" = 254
+"libraries/YAML" = 9
+"server/Markdown" = 0
+"server/Rust" = 12286
+"server/SQL" = 210
+"server/TOML" = 84
+"tests/JSON" = 24
+"tests/JavaScript" = 3046
+"tests/Protocol Buffers" = 17
+"tests/Rust" = 20807
+"tests/TOML" = 61
+"tooling/Dockerfile" = 132
+"tooling/Markdown" = 21
+"tooling/Plain Text" = 0
+"tooling/Shell" = 736
+"tooling/TOML" = 81
+"tooling/YAML" = 1057
+"web/CSS" = 384
+"web/HTML" = 411
+"web/Rust" = 8669
+"web/SVG" = 9
+"web/TOML" = 70
+
+[sovereign-config.commits.7b70e7923331cff9eeb103e014eb6b146975cc52.source_files]
+version = 1
+"libraries/Markdown" = 1
+"libraries/Protocol Buffers" = 4
+"libraries/Rust" = 65
+"libraries/TOML" = 11
+"libraries/YAML" = 1
+"server/Markdown" = 1
+"server/Rust" = 55
+"server/SQL" = 15
+"server/TOML" = 2
+"tests/JSON" = 2
+"tests/JavaScript" = 11
+"tests/Protocol Buffers" = 1
+"tests/Rust" = 49
+"tests/TOML" = 4
+"tooling/Dockerfile" = 4
+"tooling/Markdown" = 12
+"tooling/Plain Text" = 1
+"tooling/Shell" = 9
+"tooling/TOML" = 2
+"tooling/YAML" = 8
+"web/CSS" = 1
+"web/HTML" = 1
+"web/Rust" = 26
+"web/SVG" = 1
+"web/TOML" = 2
+
+[sovereign-config.commits.7b70e7923331cff9eeb103e014eb6b146975cc52.nloc]
+version = 1
+"libraries" = 11679
+"server" = 12523
+"tests" = 24430
+"web" = 8707
+
+[sovereign-config.commits.7b70e7923331cff9eeb103e014eb6b146975cc52.functions]
+version = 1
+"libraries" = 721
+"server" = 620
+"tests" = 1238
+"web" = 459
+
+[sovereign-config.commits.7b70e7923331cff9eeb103e014eb6b146975cc52.complexity_total]
+version = 1
+"libraries" = 1958
+"server" = 1668
+"tests" = 2093
+"web" = 1532
+
+[sovereign-config.commits.7b70e7923331cff9eeb103e014eb6b146975cc52.functions_over_10]
+version = 1
+"libraries" = 19
+"server" = 23
+"tests" = 5
+"web" = 21
+
+[sovereign-config.commits.7b70e7923331cff9eeb103e014eb6b146975cc52.max_function_complexity]
+version = 1
+"libraries" = 46
+"server" = 24
+"tests" = 37
+"web" = 37
+
+[sovereign-config.commits.7b70e7923331cff9eeb103e014eb6b146975cc52.function_complexity]
+version = 1
+
+[sovereign-config.commits.7b70e7923331cff9eeb103e014eb6b146975cc52.lines_added]
+version = 1
+"libraries" = 634
+"server" = 531
+"tests" = 418
+"tooling" = 38
+"web" = 374
+
+[sovereign-config.commits.7b70e7923331cff9eeb103e014eb6b146975cc52.lines_deleted]
+version = 1
+"libraries" = 58
+"server" = 165
+"tests" = 53
+"tooling" = 10
+"web" = 71
+
+[sovereign-config.commits.7b70e7923331cff9eeb103e014eb6b146975cc52.files_changed]
+version = 1
+"libraries" = 11
+"server" = 14
+"tests" = 8
+"tooling" = 6
+"web" = 6
+
+[sovereign-config.commits.7b70e7923331cff9eeb103e014eb6b146975cc52.operations]
+version = 1
+"libraries/grpc_method" = 16
+"libraries/mcp_tool" = 16
+"server/http_route" = 5
+
+[sovereign-config.commits.7b70e7923331cff9eeb103e014eb6b146975cc52.e2e_scenarios]
+version = 1
+"tests/browser" = 86
+"tests/rust-integration" = 189
+

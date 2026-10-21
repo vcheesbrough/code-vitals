@@ -12,11 +12,15 @@ import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+import psycopg
+
 from code_vitals import obs, telemetry
 from code_vitals.build_info import BuildInfo, load_build_info
+from code_vitals.checks import check_repo, check_status
 from code_vitals.collect import collect
 from code_vitals.db.migrate import migrate
 from code_vitals.repos import REPOS, RepoConfig
+from code_vitals.retire import RetireRefused, retire
 
 DATABASE_URL_ENV = "CODE_VITALS_DATABASE_URL"
 # Role password variables `migrate` reads, by role.
@@ -63,6 +67,35 @@ def build_parser(info: BuildInfo, repos: Mapping[str, RepoConfig]) -> argparse.A
     collect_parser.add_argument(
         "--trigger", default=str(obs.Trigger.MANUAL), choices=[str(t) for t in obs.Trigger]
     )
+    check_repo_parser = commands.add_parser(
+        "check-repo",
+        help="check one repo after a deployment's collect",
+        description=(
+            "After `collect`, with the same clone: a second catch-up must find nothing to do,"
+            " and the values at the fixed commits of expected_values.toml must match."
+        ),
+    )
+    check_repo_parser.add_argument("--repo", required=True, choices=sorted(repos))
+    check_repo_parser.add_argument("--clone", required=True, type=Path, help="path to a full clone")
+    commands.add_parser(
+        "check-status",
+        help="check every repo after a deployment's collects",
+        description=(
+            "Every measure version this build registers, and every repo's area ruleset, must"
+            " be complete, and every repo's last run must have succeeded."
+        ),
+    )
+    retire_parser = commands.add_parser(
+        "retire",
+        help="retire a measure version this build no longer records",
+        description=(
+            "Mark a measure version retired, so the views stop reading it. --delete-rows also"
+            f" deletes its values, which needs the owner's {DATABASE_URL_ENV}."
+        ),
+    )
+    retire_parser.add_argument("measure")
+    retire_parser.add_argument("version", type=int)
+    retire_parser.add_argument("--delete-rows", action="store_true")
     return parser
 
 
@@ -84,7 +117,7 @@ def main(
         print(f"code-vitals {args.command}: {DATABASE_URL_ENV} is required", file=sys.stderr)
         return 2
     _log_problems_to_stderr()
-    instance = args.repo if args.command == "collect" else args.command
+    instance = args.repo if args.command in ("collect", "check-repo") else args.command
     try:
         running = telemetry.setup(environ, info, instance)
     except telemetry.TelemetryConfigError as error:
@@ -95,6 +128,12 @@ def main(
     try:
         if args.command == "migrate":
             return _migrate(conninfo, environ)
+        if args.command == "check-repo":
+            return _check_repo(conninfo, repos[args.repo], args, info, environ)
+        if args.command == "check-status":
+            return _check_status(conninfo, repos)
+        if args.command == "retire":
+            return _retire(conninfo, args)
         return _collect(conninfo, repos[args.repo], args, info, environ)
     finally:
         if not running.shutdown():
@@ -158,4 +197,59 @@ def _collect(
             file=sys.stderr,
         )
         return 1
+    return 0
+
+
+def _report(command: str, problems: Sequence[str]) -> int:
+    for problem in problems:
+        print(f"code-vitals {command}: {problem}", file=sys.stderr)
+    if problems:
+        print(f"code-vitals {command}: {len(problems)} problem(s)", file=sys.stderr)
+        return 1
+    print(f"code-vitals {command}: ok")
+    return 0
+
+
+def _check_repo(
+    conninfo: str,
+    repo: RepoConfig,
+    args: argparse.Namespace,
+    info: BuildInfo,
+    environ: Mapping[str, str],
+) -> int:
+    print(f"code-vitals check-repo: {repo.name} from {args.clone}")
+    with obs.tracer.start_as_current_span("check-repo", attributes={obs.REPO: repo.name}):
+        try:
+            problems = check_repo(
+                conninfo,
+                repo,
+                args.clone,
+                info,
+                pipeline_number=environ.get(PIPELINE_NUMBER_ENV) or None,
+            )
+        except Exception as error:
+            problems = [f"{repo.name} could not be checked: {error}"]
+    return _report("check-repo", problems)
+
+
+def _check_status(conninfo: str, repos: Mapping[str, RepoConfig]) -> int:
+    with obs.tracer.start_as_current_span("check-status"):
+        try:
+            problems = check_status(conninfo, list(repos.values()))
+        except Exception as error:
+            problems = [f"could not be checked: {error}"]
+    return _report("check-status", problems)
+
+
+def _retire(conninfo: str, args: argparse.Namespace) -> int:
+    with obs.tracer.start_as_current_span("retire", attributes={obs.MEASURE: args.measure}):
+        try:
+            done = retire(conninfo, args.measure, args.version, delete_rows=args.delete_rows)
+        except (RetireRefused, psycopg.Error) as error:
+            print(f"code-vitals retire: {error}", file=sys.stderr)
+            return 1
+    print(
+        f"code-vitals retire: {args.measure} v{args.version} retired (was {done.previous_status});"
+        f" {done.rows_deleted} row(s) deleted"
+    )
     return 0

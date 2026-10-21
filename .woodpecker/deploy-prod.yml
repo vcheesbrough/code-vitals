@@ -8,7 +8,8 @@
 # the push pipeline already built, tested and published for this commit and
 # never rebuilds (bored card #254).
 #
-#   (find-commit-tag → verify-image ∥ apply-authentik-blueprint) → deploy → smoke → tag-release
+#   (find-commit-tag → verify-image ∥ apply-authentik-blueprint) → deploy
+#     → (smoke ∥ collect-<repo> ×3 → check) → tag-release → promote-stable
 #
 # deploy-dev.yml is the same flow for dev, from any branch;
 # tests/test_pipelines.py pins both gates. The steps are kept identical apart
@@ -105,7 +106,7 @@ steps:
       <<: *registry-creds
       POSTGRES_PASSWORD:
         from_secret: code_vitals_prod_postgres_password
-      CODE_VITALS_WRITER_PASSWORD:
+      CODE_VITALS_WRITER_PASSWORD: &writer-password
         from_secret: code_vitals_prod_writer_password
       CODE_VITALS_READER_PASSWORD: &reader-password
         from_secret: code_vitals_prod_reader_password
@@ -134,8 +135,61 @@ steps:
       - apk add --no-cache curl
       - ./scripts/smoke-superset.sh prod
 
+  collect-v-note:
+    # The deployed image, by digest, catches each measured repo up with
+    # trigger=backfill and checks it (scripts/run-collector.sh, card #497): a
+    # bumped measure version or area ruleset is recomputed over the whole
+    # history here — in dev from the branch, in prod on release — and the
+    # values at the fixed commits of src/code_vitals/expected_values.toml must
+    # match. One step per repo, in parallel.
+    depends_on:
+      - deploy
+    image: *docker-image
+    volumes: *docker-socket
+    environment: &collect-env
+      <<: *registry-creds
+      CODE_VITALS_WRITER_PASSWORD: *writer-password
+    commands:
+      - *docker-login
+      - ./scripts/run-collector.sh prod "$$(cat .deploy-image)" repo v-note
+
+  collect-bored:
+    depends_on:
+      - deploy
+    image: *docker-image
+    volumes: *docker-socket
+    environment: *collect-env
+    commands:
+      - *docker-login
+      - ./scripts/run-collector.sh prod "$$(cat .deploy-image)" repo bored
+
+  collect-sovereign-config:
+    depends_on:
+      - deploy
+    image: *docker-image
+    volumes: *docker-socket
+    environment: *collect-env
+    commands:
+      - *docker-login
+      - ./scripts/run-collector.sh prod "$$(cat .deploy-image)" repo sovereign-config
+
+  check:
+    # Once every repo is collected: every version this build registers is
+    # complete, so the views read it, and every repo's last run succeeded. A
+    # failure fails the deployment before tag-release.
+    depends_on:
+      - collect-v-note
+      - collect-bored
+      - collect-sovereign-config
+    image: *docker-image
+    volumes: *docker-socket
+    environment: *collect-env
+    commands:
+      - *docker-login
+      - ./scripts/run-collector.sh prod "$$(cat .deploy-image)" status
+
   tag-release:
-    # After a successful deploy, push the git tag matching .release-tag, so a
+    # After a successful deploy and its checks, push the git tag matching .release-tag, so a
     # tag means "this version was deployed". push-tag is idempotent: a commit
     # already carrying this tag (a redeploy, or dev then prod) exits 0, and a
     # commit never gets a second tag. push-tag never reads the manifest, but
@@ -144,6 +198,7 @@ steps:
     # (card #503).
     depends_on:
       - smoke
+      - check
     pull: true
     image: ghcr.io/vcheesbrough/woodpecker-plugin-release-versions:0.1.1@sha256:cf74d9706cb42b6d27c8d185789cd814ed061c8c88e06452d33ce3aed0bf9a22
     settings:
@@ -151,3 +206,22 @@ steps:
       major_minor_source: cargo
       github_token:
         from_secret: github_token
+
+  promote-stable:
+    # LAST: move :stable — the tag the measured repos' push workflows run
+    # (AGENTS.md § Deviations register) — to this build, only once prod's
+    # checks passed and the commit is tagged as deployed, so those workflows
+    # never pick up an image that failed. Dev never moves it.
+    depends_on:
+      - tag-release
+    image: *docker-image
+    volumes: *docker-socket
+    environment: *registry-creds
+    commands:
+      - *docker-login
+      - |
+        IMAGE=$$(cat .deploy-image)
+        docker pull "$$IMAGE"
+        docker tag "$$IMAGE" registry.desync.link/code-vitals-collector:stable
+        docker push registry.desync.link/code-vitals-collector:stable
+        echo "code-vitals-collector:stable is now $$IMAGE"

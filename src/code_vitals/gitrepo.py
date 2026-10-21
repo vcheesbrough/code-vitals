@@ -103,6 +103,15 @@ class Clone:
         full_sha, committed_at, author, subject = out.rstrip("\n").split("\x00", 3)
         return CommitInfo(full_sha, datetime.fromisoformat(committed_at), author, subject)
 
+    def commit_times(self, head: str) -> dict[str, datetime]:
+        """Each first-parent commit's commit time, in one git call."""
+        out = self._git("log", "--first-parent", "--format=%H%x00%cI", head)
+        times = {}
+        for line in out.splitlines():
+            sha, committed_at = line.split("\x00")
+            times[sha] = datetime.fromisoformat(committed_at)
+        return times
+
     def tags_by_commit(self) -> dict[str, list[str]]:
         """Every tag, by the commit it points at (annotated tags peeled)."""
         out = self._git(

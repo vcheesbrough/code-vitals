@@ -26,11 +26,20 @@ if [ "\$1" = run ]; then
     # The secrets must reach migrate through the environment, not the args.
     echo "url=\$CODE_VITALS_DATABASE_URL" >> "$WORK_DIR/run-env"
 fi
+if [ "\$1" = compose ]; then
+    echo "compose env=\$CODE_VITALS_ENV host=\$SUPERSET_HOST image=\$SUPERSET_IMAGE reader=\${CODE_VITALS_READER_URI:-}" >> "$WORK_DIR/compose-env"
+fi
+if [ "\$1" = exec ] && [ "\$2" = -i ]; then
+    cat > "$WORK_DIR/stdin-\$(echo "\$*" | md5sum | cut -c1-8)"
+    echo "superset_pw=\${SUPERSET_NEW_PASSWORD:-}" >> "$WORK_DIR/exec-env"
+fi
 exit 0
 EOF
 chmod +x "$WORK_DIR/bin/docker"
 
 IMAGE=registry.example/code-vitals-collector@sha256:abc
+SUPERSET=registry.example/code-vitals-superset@sha256:def
+SECRETS="POSTGRES_PASSWORD=pgpw0123 CODE_VITALS_WRITER_PASSWORD=wpw CODE_VITALS_READER_PASSWORD=rpw SUPERSET_SECRET_KEY=sskey123 SUPERSET_DB_PASSWORD=sdbpw AUTHENTIK_CLIENT_SECRET=ocsecret9"
 
 failures=0
 pass() { echo "ok   - $1"; }
@@ -40,9 +49,11 @@ fail() { echo "FAIL - $1" >&2; failures=$((failures + 1)); }
 run() {
     : > "$WORK_DIR/docker-calls"
     : > "$WORK_DIR/run-env"
-    (cd "$SCRIPT_DIR/.." && PATH="$WORK_DIR/bin:$PATH" \
-        POSTGRES_PASSWORD=pgpw0123 CODE_VITALS_WRITER_PASSWORD=wpw CODE_VITALS_READER_PASSWORD=rpw \
-        sh "$UNDER_TEST" "$1" "$IMAGE") > "$WORK_DIR/out" 2>&1
+    : > "$WORK_DIR/compose-env"
+    : > "$WORK_DIR/exec-env"
+    # shellcheck disable=SC2086  # SECRETS is a list of NAME=value words
+    (cd "$SCRIPT_DIR/.." && env PATH="$WORK_DIR/bin:$PATH" $SECRETS \
+        sh "$UNDER_TEST" "$1" "$IMAGE" "$SUPERSET") > "$WORK_DIR/out" 2>&1
 }
 
 calls() { cat "$WORK_DIR/docker-calls"; }
@@ -60,8 +71,28 @@ else
     fail "prod: $(cat "$WORK_DIR/out") / calls: $(calls)"
 fi
 
+migrate=$(line_of "^run --rm --network code-vitals_default .* migrate$")
+role=$(line_of "^exec -i -e SUPERSET_NEW_PASSWORD code-vitals-postgres-1 psql")
+init=$(line_of "^compose -p code-vitals -f deploy/compose.yaml --profile init run --rm --pull always superset-init$")
+up=$(line_of "^compose -p code-vitals -f deploy/compose.yaml up -d --pull always --wait --wait-timeout 300 superset$")
+if [ -n "$migrate" ] && [ -n "$role" ] && [ -n "$init" ] && [ -n "$up" ] \
+    && [ "$migrate" -lt "$role" ] && [ "$role" -lt "$init" ] && [ "$init" -lt "$up" ]; then
+    pass "prod: superset role/db, bootstrap, then superset up, after migrate"
+else
+    fail "superset order: migrate=$migrate role=$role init=$init up=$up / calls: $(calls)"
+fi
+
+if grep -q "^compose env=prod host=code-vitals.desync.link image=$SUPERSET reader=postgresql+psycopg2://code_vitals_reader:rpw@postgres:5432/code_vitals$" "$WORK_DIR/compose-env" \
+    && grep -qx "superset_pw=sdbpw" "$WORK_DIR/exec-env" \
+    && grep -q "CREATE DATABASE superset OWNER superset" "$WORK_DIR"/stdin-* \
+    && ! grep -q "sdbpw" "$WORK_DIR"/stdin-*; then
+    pass "superset: environment names, reader URI and metadata password reach compose/psql by environment only"
+else
+    fail "superset env: $(cat "$WORK_DIR/compose-env") / $(cat "$WORK_DIR/exec-env")"
+fi
+
 if grep -qx "url=postgresql://code_vitals:pgpw0123@postgres:5432/code_vitals" "$WORK_DIR/run-env" \
-    && ! calls | grep -q "pgpw0123\|wpw\|rpw"; then
+    && ! calls | grep -q "pgpw0123\|wpw\|rpw\|sskey123\|sdbpw\|ocsecret9"; then
     pass "secrets reach migrate through its environment, never a command line"
 else
     fail "secrets: env $(cat "$WORK_DIR/run-env") / calls: $(calls)"
@@ -95,9 +126,19 @@ fi
 
 # --- refusals ----------------------------------------------------------------
 : > "$WORK_DIR/docker-calls"
+# shellcheck disable=SC2086
+if (cd "$SCRIPT_DIR/.." && env PATH="$WORK_DIR/bin:$PATH" $SECRETS sh "$UNDER_TEST" prod "$IMAGE") > /dev/null 2>&1; then
+    fail "missing superset image: expected a refusal"
+elif [ ! -s "$WORK_DIR/docker-calls" ]; then
+    pass "missing superset image: refused before touching docker"
+else
+    fail "missing superset image: docker was called: $(calls)"
+fi
+
+: > "$WORK_DIR/docker-calls"
 if (cd "$SCRIPT_DIR/.." && PATH="$WORK_DIR/bin:$PATH" POSTGRES_PASSWORD=x \
     CODE_VITALS_WRITER_PASSWORD=y CODE_VITALS_READER_PASSWORD=z \
-    sh "$UNDER_TEST" staging "$IMAGE") > /dev/null 2>&1; then
+    sh "$UNDER_TEST" staging "$IMAGE" "$SUPERSET") > /dev/null 2>&1; then
     fail "unknown environment: expected a refusal"
 elif [ ! -s "$WORK_DIR/docker-calls" ]; then
     pass "unknown environment: refused before touching docker"
@@ -107,7 +148,7 @@ fi
 
 : > "$WORK_DIR/docker-calls"
 if (cd "$SCRIPT_DIR/.." && PATH="$WORK_DIR/bin:$PATH" POSTGRES_PASSWORD=x \
-    CODE_VITALS_WRITER_PASSWORD=y sh "$UNDER_TEST" prod "$IMAGE") > "$WORK_DIR/out" 2>&1; then
+    CODE_VITALS_WRITER_PASSWORD=y sh "$UNDER_TEST" prod "$IMAGE" "$SUPERSET") > "$WORK_DIR/out" 2>&1; then
     fail "missing secret: expected a refusal"
 elif grep -q "CODE_VITALS_READER_PASSWORD is required" "$WORK_DIR/out" && [ ! -s "$WORK_DIR/docker-calls" ]; then
     pass "missing secret: refused before touching docker"
@@ -118,7 +159,8 @@ fi
 : > "$WORK_DIR/docker-calls"
 if (cd "$SCRIPT_DIR/.." && PATH="$WORK_DIR/bin:$PATH" POSTGRES_PASSWORD='p@ss/word' \
     CODE_VITALS_WRITER_PASSWORD=y CODE_VITALS_READER_PASSWORD=z \
-    sh "$UNDER_TEST" prod "$IMAGE") > "$WORK_DIR/out" 2>&1; then
+    SUPERSET_SECRET_KEY=a SUPERSET_DB_PASSWORD=b AUTHENTIK_CLIENT_SECRET=c \
+    sh "$UNDER_TEST" prod "$IMAGE" "$SUPERSET") > "$WORK_DIR/out" 2>&1; then
     fail "URL-unsafe password: expected a refusal"
 elif grep -q "may contain only" "$WORK_DIR/out" && [ ! -s "$WORK_DIR/docker-calls" ]; then
     pass "URL-unsafe password: refused before touching docker"

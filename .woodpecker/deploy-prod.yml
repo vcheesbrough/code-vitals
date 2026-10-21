@@ -8,7 +8,7 @@
 # the push pipeline already built, tested and published for this commit and
 # never rebuilds (bored card #254).
 #
-#   find-commit-tag → verify-image → deploy → tag-release
+#   (find-commit-tag → verify-image ∥ apply-authentik-blueprint) → deploy → smoke → tag-release
 #
 # deploy-dev.yml is the same flow for dev, from any branch;
 # tests/test_pipelines.py pins both gates. The steps are kept identical apart
@@ -30,6 +30,27 @@ steps:
         from_secret: github_token
     commands:
       - ./scripts/find-commit-tag.sh
+
+  apply-authentik-blueprint:
+    # Superset's OAuth2 providers, applications, groups and bindings for BOTH
+    # environments (card #499); dev deployments apply only the dev part. This
+    # guards against accidents, not a
+    # deliberate change (AGENTS.md § Deviations register), as in bored.
+    depends_on: []
+    pull: true
+    image: ghcr.io/vcheesbrough/woodpecker-plugin-authentik-blueprint:v0.2.0@sha256:9f262c4390205b5629e9af7560f4e492f0155395a429153703ba351206d9d975
+    settings:
+      api_url: https://auth.desync.link
+      api_token:
+        from_secret: authentik_api_token
+      file: authentik/blueprint.yaml
+      instance_name: code-vitals
+      timeout_seconds: 900
+      vars:
+        AUTHENTIK_CODE_VITALS_DEV_CLIENT_SECRET:
+          from_secret: code_vitals_dev_oidc_client_secret
+        AUTHENTIK_CODE_VITALS_PROD_CLIENT_SECRET:
+          from_secret: code_vitals_prod_oidc_client_secret
 
   verify-image:
     # resolve-deploy-tag.sh picks the build: the commit's existing tag, else its
@@ -63,6 +84,12 @@ steps:
         ./scripts/check-image-metadata.sh "$$IMAGE" "$$RELEASE_TAG" "$$CI_COMMIT_SHA"
         docker image inspect -f '{{ index .RepoDigests 0 }}' "$$IMAGE" > .deploy-image
         echo "deploying $$(cat .deploy-image)"
+        # The build's Superset image, published under the same version.
+        SUPERSET=registry.desync.link/code-vitals-superset:$$RELEASE_TAG
+        docker pull "$$SUPERSET"
+        ./scripts/check-image-metadata.sh "$$SUPERSET" "$$RELEASE_TAG" "$$CI_COMMIT_SHA"
+        docker image inspect -f '{{ index .RepoDigests 0 }}' "$$SUPERSET" > .deploy-superset-image
+        echo "deploying $$(cat .deploy-superset-image)"
 
   deploy:
     # Postgres up, then the deployed image's `migrate` (scripts/deploy-stack.sh;
@@ -71,6 +98,7 @@ steps:
     # register for why this is not bored's `sovereign-config render`.
     depends_on:
       - verify-image
+      - apply-authentik-blueprint
     image: *docker-image
     volumes: *docker-socket
     environment:
@@ -79,11 +107,32 @@ steps:
         from_secret: code_vitals_prod_postgres_password
       CODE_VITALS_WRITER_PASSWORD:
         from_secret: code_vitals_prod_writer_password
-      CODE_VITALS_READER_PASSWORD:
+      CODE_VITALS_READER_PASSWORD: &reader-password
         from_secret: code_vitals_prod_reader_password
+      SUPERSET_SECRET_KEY:
+        from_secret: code_vitals_prod_superset_secret_key
+      SUPERSET_DB_PASSWORD:
+        from_secret: code_vitals_prod_superset_db_password
+      AUTHENTIK_CLIENT_SECRET:
+        from_secret: code_vitals_prod_oidc_client_secret
     commands:
       - *docker-login
-      - ./scripts/deploy-stack.sh prod "$$(cat .deploy-image)"
+      - ./scripts/deploy-stack.sh prod "$$(cat .deploy-image)" "$$(cat .deploy-superset-image)"
+
+  smoke:
+    # Superset answers, its sign-in redirects to this environment's Authentik
+    # client, and its datasource role reads views only
+    # (scripts/smoke-superset.sh). A failure fails the deployment before
+    # tag-release, so the commit is not tagged as deployed.
+    depends_on:
+      - deploy
+    image: *docker-image
+    volumes: *docker-socket
+    environment:
+      CODE_VITALS_READER_PASSWORD: *reader-password
+    commands:
+      - apk add --no-cache curl
+      - ./scripts/smoke-superset.sh prod
 
   tag-release:
     # After a successful deploy, push the git tag matching .release-tag, so a
@@ -94,7 +143,7 @@ steps:
     # `cargo` is a placeholder until shared release tooling replaces this
     # (card #503).
     depends_on:
-      - deploy
+      - smoke
     pull: true
     image: ghcr.io/vcheesbrough/woodpecker-plugin-release-versions:0.1.1@sha256:cf74d9706cb42b6d27c8d185789cd814ed061c8c88e06452d33ce3aed0bf9a22
     settings:

@@ -2,7 +2,7 @@
 # (`code-vitals` for prod, `code-vitals-dev` for dev; scripts/deploy-stack.sh).
 #
 # Postgres publishes no port: everything that talks to it — migrations, the
-# collector — runs as a container on this project's network
+# collector, Superset — runs as a container on this project's network
 # (`<project>_default`) through the CI agent's docker socket, so nothing reaches
 # it over the LAN.
 name: code-vitals
@@ -26,7 +26,55 @@ services:
       timeout: 5s
       retries: 24
 
+  # Apache Superset (card #499), from the code-vitals-superset image of the
+  # build being deployed (by digest). Its metadata database `superset` lives on
+  # the postgres above; it reads code-vitals as the reader role.
+  superset:
+    image: ${SUPERSET_IMAGE:?SUPERSET_IMAGE is required}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: &superset-env
+      CODE_VITALS_ENV: ${CODE_VITALS_ENV:?CODE_VITALS_ENV is required}
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:?SUPERSET_SECRET_KEY is required}
+      SUPERSET_DB_PASSWORD: ${SUPERSET_DB_PASSWORD:?SUPERSET_DB_PASSWORD is required}
+      AUTHENTIK_CLIENT_SECRET: ${AUTHENTIK_CLIENT_SECRET:?AUTHENTIK_CLIENT_SECRET is required}
+      SUPERSET_PORT: "8088"
+    mem_limit: 2g
+    memswap_limit: 2g
+    networks:
+      - default
+      - proxy-backend
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=proxy-backend
+      - traefik.http.routers.code-vitals-${CODE_VITALS_ENV}-superset.entrypoints=websecure
+      - traefik.http.routers.code-vitals-${CODE_VITALS_ENV}-superset.rule=Host(`${SUPERSET_HOST:?SUPERSET_HOST is required}`)
+      - traefik.http.routers.code-vitals-${CODE_VITALS_ENV}-superset.tls=true
+      - traefik.http.routers.code-vitals-${CODE_VITALS_ENV}-superset.tls.certresolver=myresolver
+      - traefik.http.services.code-vitals-${CODE_VITALS_ENV}-superset.loadbalancer.server.port=8088
+      - traefik.http.services.code-vitals-${CODE_VITALS_ENV}-superset.loadbalancer.server.scheme=http
+
+  # One-off setup on every deploy (superset/bootstrap.sh): `docker compose run
+  # --rm superset-init`. Only the profile keeps it out of a plain `up`.
+  superset-init:
+    image: ${SUPERSET_IMAGE:?SUPERSET_IMAGE is required}
+    profiles: [init]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *superset-env
+      CODE_VITALS_READER_URI: ${CODE_VITALS_READER_URI:-}
+    command: ["/app/docker/code-vitals-bootstrap.sh"]
+
 volumes:
   pg:
     external: true
     name: ${PG_VOLUME:?PG_VOLUME is required}
+
+networks:
+  # Traefik's network on mini; it routes to Superset over it.
+  proxy-backend:
+    external: true

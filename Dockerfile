@@ -38,6 +38,8 @@ COPY tests ./tests
 COPY scripts ./scripts
 COPY .woodpecker ./.woodpecker
 COPY deploy ./deploy
+COPY superset ./superset
+COPY authentik ./authentik
 COPY tool-versions.env ./
 RUN uv run --frozen ruff format --check \
     && uv run --frozen ruff check \

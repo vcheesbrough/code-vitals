@@ -71,6 +71,16 @@ get their login.
 The `current_*` views show only measure versions and area rulesets whose
 backfill is `complete`, so a chart never mixes two definitions of a measure.
 
+## Superset
+
+https://code-vitals.desync.link (prod) and https://code-vitals-dev.desync.link
+(dev). Sign in through Authentik; access needs membership of
+`code-vitals[-dev]-users` (explore and build charts, Superset's Alpha role) or
+`code-vitals[-dev]-admins` (Admin), granted in Authentik. Superset reads
+code-vitals only as `code_vitals_reader`. The image (`superset/Dockerfile`) is
+Apache Superset 6.1.0 plus the Postgres driver, authlib and
+`superset/superset_config.py`.
+
 ## Deploying
 
 A Woodpecker *Deploy* of a commit, with target `dev` (any branch) or `prod`

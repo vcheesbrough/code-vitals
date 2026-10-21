@@ -1,4 +1,6 @@
+import contextlib
 import threading
+from collections.abc import Iterator
 from pathlib import Path
 
 import psycopg
@@ -146,3 +148,47 @@ def test_cli_migrate_applies_and_sets_logins(
 
 def test_lock_key_fits_a_bigint() -> None:
     assert 0 < migrate_module.MIGRATE_LOCK_KEY < 2**63
+
+
+class _RecordingConnection:
+    """Records each statement and whether it ran inside a transaction."""
+
+    def __init__(self) -> None:
+        self.statements: list[tuple[int, str]] = []
+        self._transaction = 0
+        self._depth = 0
+
+    @contextlib.contextmanager
+    def transaction(self) -> Iterator[None]:
+        self._transaction += 1
+        self._depth += 1
+        try:
+            yield
+        finally:
+            self._depth -= 1
+
+    def execute(self, statement: object) -> None:
+        text = statement if isinstance(statement, str) else repr(statement)
+        self.statements.append((self._transaction if self._depth else 0, text))
+
+
+def test_the_password_statement_runs_with_statement_logging_off() -> None:
+    conn = _RecordingConnection()
+
+    migrate_module._set_login_password(conn, "code_vitals_reader", "s3cret")  # type: ignore[arg-type]
+
+    transactions = {tx for tx, _ in conn.statements}
+    assert transactions == {1}, "everything must run in one transaction"
+    texts = [text for _, text in conn.statements]
+    alter = next(i for i, t in enumerate(texts) if "ALTER ROLE" in t)
+    for setting in (
+        "SET LOCAL log_statement = 'none'",
+        "SET LOCAL log_min_error_statement = 'panic'",
+        "SET LOCAL log_min_duration_statement = -1",
+    ):
+        assert setting in texts[:alter], f"{setting} must precede ALTER ROLE"
+
+
+def test_an_empty_password_is_refused() -> None:
+    with pytest.raises(ValueError, match="empty password"):
+        migrate_module._set_login_password(_RecordingConnection(), "code_vitals_reader", "")  # type: ignore[arg-type]

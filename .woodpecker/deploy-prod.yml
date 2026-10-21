@@ -1,8 +1,12 @@
 # Deploy-prod: a manual Woodpecker deployment targeting `prod`, from `main`
-# ONLY — enforced in `when:` below, so a deployment from another branch never
-# starts (tests/test_pipelines.py pins it). It promotes the image the push
-# pipeline already built, tested and published for this commit and never
-# rebuilds (bored card #254).
+# ONLY — gated in `when:` below, so a deployment from another branch never
+# starts (tests/test_pipelines.py pins it). That gate stops ACCIDENTS, not a
+# deliberate change: Woodpecker runs the pipeline files of the commit it
+# deploys, so a branch can edit this gate, and the broker hands the prod
+# secrets to any pipeline of this repo. The trust boundary is who may push and
+# start deployments (AGENTS.md § Deviations register). It promotes the image
+# the push pipeline already built, tested and published for this commit and
+# never rebuilds (bored card #254).
 #
 #   find-commit-tag → verify-image → deploy → tag-release
 #

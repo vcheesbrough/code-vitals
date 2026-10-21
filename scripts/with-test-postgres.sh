@@ -27,14 +27,25 @@ NAME="code-vitals-test-postgres-$$-$(date +%s)"
 
 # A cancelled CI run never reaches its trap; reap leftovers older than an hour
 # (by label, so no other container is touched) before starting a new one.
-for stale in $(docker ps -aq --filter label=code-vitals.test-postgres=1 \
-                 --filter "until=1h" 2>/dev/null || true); do
-  docker rm -f "$stale" > /dev/null 2>&1 || true
+# `docker ps` has no `until` filter, so each container carries its start time
+# as a label and the age is checked here. bored's copy of this script still
+# passes `until`, which the daemon rejects, so its reaper never runs.
+now=$(date +%s)
+for stale in $(docker ps -aq --filter label=code-vitals.test-postgres=1); do
+  started=$(docker inspect -f '{{ index .Config.Labels "code-vitals.test-postgres.started" }}' "$stale" 2>/dev/null || true)
+  case "$started" in
+    '' | *[!0-9]*) continue ;;
+  esac
+  if [ "$started" -lt $((now - 3600)) ]; then
+    echo "removing stale test postgres $stale"
+    docker rm -f "$stale" > /dev/null 2>&1 || true
+  fi
 done
 
 # Durability is worthless for a throwaway test database, and switching it off
 # makes the suite's many CREATE DATABASEs fast.
 docker run -d --rm --name "$NAME" --label code-vitals.test-postgres=1 \
+  --label "code-vitals.test-postgres.started=$now" \
   -e POSTGRES_PASSWORD="$PASSWORD" -e POSTGRES_USER=code_vitals -e POSTGRES_DB=code_vitals \
   "$IMAGE" -c fsync=off -c synchronous_commit=off -c full_page_writes=off > /dev/null
 # shellcheck disable=SC2064  # expand NAME now, not at trap time

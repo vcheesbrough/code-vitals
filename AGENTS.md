@@ -85,7 +85,7 @@ Two environments on mini, each its own compose project of `deploy/compose.yaml`:
 | --- | --- | --- |
 | Compose project / Postgres container | `code-vitals-dev` / `code-vitals-dev-postgres-1` | `code-vitals` / `code-vitals-postgres-1` |
 | Data volume | `code-vitals-dev-pg` | `code-vitals-prod-pg` |
-| Deployed by | Woodpecker *Deploy*, target `dev`, **any branch** (`.woodpecker/deploy-dev.yml`) | target `prod`, **`main` only**, enforced in `when:` (`.woodpecker/deploy-prod.yml`) |
+| Deployed by | Woodpecker *Deploy*, target `dev`, **any branch** (`.woodpecker/deploy-dev.yml`) | target `prod`, **`main` only**, gated in `when:` (`.woodpecker/deploy-prod.yml`) |
 
 - **A push never deploys.** A deployment promotes the image the push already
   published (resolved through the commit, then used by digest) and never
@@ -98,7 +98,9 @@ Two environments on mini, each its own compose project of `deploy/compose.yaml`:
 - **Postgres publishes no port.** Migrations and the collector run as
   containers on the project's network through the agent's docker socket.
 - `tests/test_pipelines.py` pins the gates: prod only from `main`, dev only to
-  dev, a push never deploys, every step image pinned by digest.
+  dev, a push never deploys, every step image pinned by digest. **The gates
+  guard against accidents, not against a deliberate change** — see the trust
+  assumption in § Deviations register.
 
 ### Planning vs implementation (scope gate)
 
@@ -130,6 +132,18 @@ core, not saved for the `1.0.0` card, which is only the sign-off.
 - Superset and Postgres are third-party and outside the product contract.
 
 ### Deviations register
+
+- **Trust assumption: only the owner pushes branches or starts deployments.**
+  Woodpecker runs the pipeline files of the commit it builds or deploys, so a
+  branch can rewrite the prod gate in `deploy-prod.yml` (and the test that pins
+  it). The sovereign-config broker hands this repo's whole per-repo layer —
+  dev **and** prod database passwords — plus the shared layer
+  (`github_token`, zot credentials) to every pipeline of the repo, whatever its
+  event; it has no per-event or per-branch scoping. And a dev deploy runs
+  `pg_dump` on the prod container by design, so dev has prod's data. bored
+  records the same limit for its blueprint steps. Making it a real boundary
+  needs the broker to withhold prod secrets from non-deployment, non-`main`
+  pipelines; until then the gates stop mistakes only.
 
 - **Deploy secrets via `from_secret`, not `sovereign-config render`.** bored's
   deploy reads its compose layer through a read-only sovereign-config

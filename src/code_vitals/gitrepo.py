@@ -25,6 +25,18 @@ class CommitInfo:
     subject: str
 
 
+# git's well-known empty tree: the "parent" of a root commit.
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+
+@dataclass(frozen=True)
+class FileChange:
+    path: str
+    added: int  # 0 for a binary file
+    deleted: int
+    binary: bool
+
+
 @dataclass(frozen=True)
 class ExtractedTree:
     path: Path
@@ -70,10 +82,21 @@ class Clone:
                 return result.stdout.strip()
         raise GitError(f"no trunk {trunk!r} in {self.path} (neither origin/{trunk} nor {trunk})")
 
-    def first_parent_history(self, head: str) -> list[str]:
-        """Trunk commits, oldest first, following first parents only: a squash
-        or merge commit is one step, and merged branches are not walked."""
-        return self._git("rev-list", "--first-parent", "--reverse", head).split()
+    def first_parent_history(self, head: str) -> list[tuple[str, str | None]]:
+        """Trunk commits, oldest first, with each one's first parent (None for
+        a root commit), following first parents only: a squash or merge commit
+        is one step, and merged branches are not walked. Refuses a shallow
+        clone, whose oldest commit would look like a root and record the whole
+        tree as added lines."""
+        if self._git("rev-parse", "--is-shallow-repository").strip() == "true":
+            raise GitError(f"{self.path} is a shallow clone; the collector needs full history")
+        history = []
+        for line in self._git(
+            "rev-list", "--first-parent", "--parents", "--reverse", head
+        ).splitlines():
+            sha, *parents = line.split()
+            history.append((sha, parents[0] if parents else None))
+        return history
 
     def commit_info(self, sha: str) -> CommitInfo:
         out = self._git("show", "-s", "--format=%H%x00%cI%x00%an%x00%s", sha)
@@ -92,6 +115,80 @@ class Clone:
             obj, peeled, name = line.split("\x00")
             tags[peeled or obj].append(name)
         return {sha: sorted(names) for sha, names in tags.items()}
+
+    def changes(self, parent: str | None, sha: str) -> list[FileChange]:
+        """Per-file line changes from `parent` (the empty tree for a root
+        commit) to `sha`, from git's object data alone.
+
+        `git diff --numstat` applies the `diff`/`binary` attributes of whatever
+        `.gitattributes` the clone has checked out — not the measured commit's —
+        so a file marked `-diff` would count no lines. Instead: the changed
+        paths come from `diff --raw` (no attributes); a modified file's lines
+        from diffing its two blobs by object id (no path, so no attribute can
+        match); an added or deleted file's lines from the blob itself. Binary
+        files are detected by content (a NUL in the first 8000 bytes, git's own
+        rule) and count no lines. Renames are a delete plus an add: rename
+        detection is a similarity heuristic that may differ between git
+        versions, and recorded values must not. Submodules are skipped."""
+        raw = self._git(
+            "diff", "--raw", "-z", "--no-renames", "--no-abbrev", parent or EMPTY_TREE, sha
+        )
+        fields = raw.split("\0")
+        entries = []
+        for meta, path in zip(fields[0::2], fields[1::2], strict=False):
+            if not meta:
+                continue
+            old_mode, new_mode, old_blob, new_blob, status = meta.lstrip(":").split(" ")
+            if "160000" in (old_mode, new_mode):
+                continue  # a submodule pointer, not file content
+            entries.append((status, old_blob, new_blob, path))
+
+        whole = [b for status, old, new, _ in entries for b in (
+            [new] if status == "A" else [old] if status == "D" else []
+        )]  # fmt: skip
+        blobs = self._blobs(whole)
+        changes = []
+        for status, old_blob, new_blob, path in entries:
+            if status == "A":
+                added = _lines(blobs[new_blob])
+                changes.append(FileChange(path, max(added, 0), 0, added < 0))
+            elif status == "D":
+                deleted = _lines(blobs[old_blob])
+                changes.append(FileChange(path, 0, max(deleted, 0), deleted < 0))
+            else:
+                out = self._git("diff", "--numstat", "--no-ext-diff", old_blob, new_blob)
+                if not out.strip():
+                    changes.append(FileChange(path, 0, 0, False))  # mode change only
+                    continue
+                a, d = out.split("\t", 2)[:2]
+                binary = a == "-"
+                changes.append(
+                    FileChange(path, 0 if binary else int(a), 0 if binary else int(d), binary)
+                )
+        return changes
+
+    def _blobs(self, objects: list[str]) -> dict[str, bytes]:
+        if not objects:
+            return {}
+        with obs.git_span("cat-file"):
+            result = subprocess.run(
+                ["git", "-C", str(self.path), "cat-file", "--batch"],
+                input="".join(f"{o}\n" for o in objects).encode(),
+                capture_output=True,
+                check=False,
+            )
+        if result.returncode != 0:
+            raise GitError(f"git cat-file failed: {result.stderr.decode(errors='replace')}")
+        blobs = {}
+        data = result.stdout
+        pos = 0
+        for obj in objects:
+            end = data.index(b"\n", pos)
+            header = data[pos:end].split()
+            size = int(header[2])
+            blobs[obj] = data[end + 1 : end + 1 + size]
+            pos = end + 1 + size + 1
+        return blobs
 
     def read_file(self, sha: str, path: str) -> str | None:
         """A file's content at a commit, or None if it did not exist there."""
@@ -174,3 +271,13 @@ def _inside(root: Path, relative: str) -> bool:
 
     joined = os.path.normpath(os.path.join(root, relative))
     return joined == str(root) or joined.startswith(str(root) + os.sep)
+
+
+def _lines(content: bytes) -> int:
+    """A blob's lines as git's numstat counts them, or -1 if it is binary."""
+    if b"\0" in content[:8000]:
+        return -1
+    lines = content.count(b"\n")
+    if content and not content.endswith(b"\n"):
+        lines += 1
+    return lines

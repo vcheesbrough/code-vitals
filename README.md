@@ -76,7 +76,7 @@ be on the stack network and `proxy-backend`.
 
 ## Measures
 
-All snapshot measures, recorded at every trunk commit and split by area
+Snapshot measures, recorded at every trunk commit and split by area
 (`src/code_vitals/repos.py` holds each repo's versioned area rules; shared
 excludes and test rules in `src/code_vitals/areas.py`):
 
@@ -91,6 +91,16 @@ excludes and test rules in `src/code_vitals/areas.py`):
 | `functions_over_10` | lizard | — | functions with complexity over 10 |
 | `max_function_complexity` | lizard | — | the most complex function's complexity |
 | `function_complexity` | lizard | — | one row per function (hotspots), in `function_complexity` |
+| `operations` | regex | kind | HTTP routes, gRPC methods (distinct `Service.Method`), MCP tools, outside the tests area |
+| `e2e_scenarios` | regex | suite | Playwright scenarios, Kotlin `@Test`, Rust integration tests, per suite |
+
+Flow measures (what each commit changed against its first parent, summed per
+period): `lines_added`, `lines_deleted`, `files_changed`, by area, from
+`git diff --numstat --no-renames`.
+
+The operation and suite patterns are per repo, in
+`src/code_vitals/measures/functionality.py`; their digest is part of each
+measure's definition, so changing a pattern needs a version bump.
 
 Ratios are not stored: complexity per 1,000 lines is `complexity_total / nloc`
 (lizard's lines, as the prototype used), not over tokei's `lines_of_code`.

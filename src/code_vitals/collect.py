@@ -244,7 +244,9 @@ def _catch_up(
     trigger: obs.Trigger,
 ) -> RunResult:
     span = trace.get_current_span()
-    history = clone.first_parent_history(head)
+    history_with_parents = clone.first_parent_history(head)
+    history = [sha for sha, _ in history_with_parents]
+    parents = dict(history_with_parents)
     with obs.db_span("SELECT", "done markers"):
         done = {
             (str(sha), int(str(measure_id)))
@@ -276,7 +278,18 @@ def _catch_up(
     measured = failed = 0
     for sha, missing in work:
         try:
-            _measure_commit(conn, clone, repo, repo_id, sha, missing, measure_ids, ruleset, tags)
+            _measure_commit(
+                conn,
+                clone,
+                repo,
+                repo_id,
+                sha,
+                parents.get(sha),
+                missing,
+                measure_ids,
+                ruleset,
+                tags,
+            )
         except Exception:
             failed += 1
             log.exception(
@@ -300,6 +313,7 @@ def _measure_commit(
     repo: RepoConfig,
     repo_id: int,
     sha: str,
+    parent: str | None,
     missing: Sequence[Measure],
     measure_ids: dict[tuple[str, int], int],
     ruleset: _Ruleset,
@@ -314,7 +328,9 @@ def _measure_commit(
             tree = clone.extract_tree(sha, Path(tmp))
             if tree.skipped:
                 log.info("skipped %d tree entries at %s", tree.skipped, sha)
-            context = CommitContext(repo.name, sha, tree.path, tree.files, ruleset.rules)
+            context = CommitContext(
+                repo.name, sha, tree.path, tree.files, ruleset.rules, parent=parent, clone=clone
+            )
             for m in missing:
                 measure_id = measure_ids[(m.name, m.version)]
                 started = time.monotonic()

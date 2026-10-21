@@ -32,7 +32,13 @@ Shared skills apply here once the machine is wired up (`start-iteration`,
 `ci-watch`, `pr-review-loop`). Their per-repo parameters:
 
 - `OWNER=vcheesbrough`, `REPO=code-vitals`
-- CI reproduce commands: _none yet — added by the scaffold card._
+- CI reproduce commands (from the repo root):
+  - lint, types, tests: `uv sync && uv run ruff format --check && uv run ruff check && uv run mypy && uv run pytest`
+  - script tests: `for t in scripts/test-*.sh; do sh "$t"; done`
+  - the image, exactly as CI builds it (runs every test above inside the build):
+    `. ./tool-versions.env && docker build --build-arg TOKEI_VERSION="$TOKEI_VERSION" --build-arg RELEASE_TAG=0.1.999 --build-arg GIT_REVISION=local --label org.opencontainers.image.version=0.1.999 --label org.opencontainers.image.revision=local --label org.opencontainers.image.created=now -t code-vitals-collector:local .`
+    then `scripts/check-image-metadata.sh code-vitals-collector:local 0.1.999 local` and
+    `scripts/check-image-tools.sh code-vitals-collector:local 0.1.999 local`
 - Extra review criteria beyond the baseline five (correctness, security/OWASP,
   tests, versioning, scope):
   - **Backfillability** — every measure must be computable from git alone at
@@ -50,6 +56,24 @@ Shared skills apply here once the machine is wired up (`start-iteration`,
 This repository was initialized directly on `main`. The initial commit that
 creates this file and establishes the default branch is allowed on `main`.
 After initialization, follow the baseline feature-branch workflow (§2–§3).
+
+### Versioning and releases (overrides baseline §2's patch rule)
+
+The release flow is **bored's**, ported (its `.woodpecker/build.yml` and
+`scripts/`, card #461 there); see README § Versioning. In short:
+
+- **Minor `N` = iteration number**; `pyproject.toml` holds `0.N.0` and stays
+  there for the whole iteration. **The patch is not bumped by hand** — CI sets
+  it to the Woodpecker number of the push pipeline that built the image
+  (`scripts/compute-release-tag.sh`), so versions are sparse (`0.1.12`,
+  `0.1.15`, …).
+- The same string is the image tag, the git tag and the version baked into the
+  image (`/etc/code-vitals/build-info.json`).
+- Every push, on any branch, publishes `:<version>` and `:commit-<sha>` once
+  the in-build tests pass; republishing an existing version is refused. **A
+  push never pushes a git tag**: the tag is pushed only after a successful
+  deployment, so it means "deployed".
+- Replacing these copied scripts with shared tooling is card #503.
 
 ### Planning vs implementation (scope gate)
 

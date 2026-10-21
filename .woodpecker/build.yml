@@ -1,0 +1,90 @@
+# Push/manual: (compute-version ∥ prune-build-cache) → build (local, no push) → publish-image
+#   build builds the image and runs every test inside it (the Dockerfile's test stage), then checks its labels and
+#   tools; publish-image pushes to the registry ONLY after that, so the registry holds tested images only.
+#   A push never deploys. Deployments (a later card) promote an image a push already published and never rebuild
+#   (bored card #254).
+#
+# Release mechanics — bored's flow (its .woodpecker/build.yml, card #461), ported:
+#   - A build's version is MAJOR.MINOR from pyproject.toml + PATCH = its push pipeline's CI_PIPELINE_NUMBER
+#     (scripts/compute-release-tag.sh). Pipeline numbers are unique, so concurrent builds can never collide on a
+#     version and git holds no state the build depends on. Patches are sparse (0.1.12, 0.1.15, …).
+#   - RELEASE_TAG is burned into the image (build-arg → /etc/code-vitals/build-info.json) and used as its docker
+#     tag; the git tag is byte-identical. publish-image also pushes each green build as :commit-<sha>, the latest
+#     green build of that commit.
+#   - The git tag is pushed only after a successful deploy, so a tag means "this version was deployed". No step
+#     here pushes one.
+when:
+  - event: [push, manual]
+
+steps:
+  compute-version:
+    # The build's version: MAJOR.MINOR from pyproject.toml + this pipeline's
+    # number (see "Release mechanics" above). Reads no git state.
+    depends_on: []
+    image: &alpine-image alpine:3.21@sha256:f27cad9117495d32d067133afff942cb2dc745dfe9163e949f6bfe8a6a245339
+    commands:
+      - ./scripts/compute-release-tag.sh > .release-tag
+      - echo "RELEASE_TAG=$(cat .release-tag)"
+
+  prune-build-cache:
+    # Bounds this repository's two BuildKit cache mounts (tokei's cargo
+    # registry, uv's wheels), which nothing else on the host prunes. Only those
+    # mounts are measured or removed, never another repository's cache, and it
+    # never fails the build (sovereign-config's prune-build-cache).
+    depends_on: []
+    image: &docker-image docker:27-cli@sha256:851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c
+    volumes: &docker-socket
+      - /var/run/docker.sock:/var/run/docker.sock
+    commands:
+      - CI_BUILDKIT_CACHE_ID=code-vitals-uv-cache sh scripts/ci-prune-buildkit-cache.sh
+      - CI_BUILDKIT_CACHE_ID=code-vitals-cargo-registry sh scripts/ci-prune-buildkit-cache.sh
+
+  build:
+    # Build the image LOCALLY — do not push yet. The Dockerfile's test stage
+    # runs lint, type checks, unit tests and the script tests, and the runtime
+    # stage depends on it, so a red test fails this step. Then check the OCI
+    # labels and that the image runs with its pinned tools and identity.
+    # build and publish-image share one agent and docker daemon, so the image
+    # built here is what publish-image pushes. Base images are public, so no
+    # registry login is needed here.
+    depends_on:
+      - compute-version
+      - prune-build-cache
+    image: *docker-image
+    volumes: *docker-socket
+    commands:
+      - |
+        . ./tool-versions.env
+        RELEASE_TAG=$$(cat .release-tag)
+        CREATED=$$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        IMAGE=registry.desync.link/code-vitals-collector:$$RELEASE_TAG
+        docker build \
+          --progress=plain \
+          --build-arg TOKEI_VERSION="$$TOKEI_VERSION" \
+          --build-arg RELEASE_TAG="$$RELEASE_TAG" \
+          --build-arg GIT_REVISION="$$CI_COMMIT_SHA" \
+          --label org.opencontainers.image.version="$$RELEASE_TAG" \
+          --label org.opencontainers.image.revision="$$CI_COMMIT_SHA" \
+          --label org.opencontainers.image.created="$$CREATED" \
+          -t "$$IMAGE" .
+        ./scripts/check-image-metadata.sh "$$IMAGE" "$$RELEASE_TAG" "$$CI_COMMIT_SHA"
+        ./scripts/check-image-tools.sh "$$IMAGE" "$$RELEASE_TAG" "$$CI_COMMIT_SHA"
+
+  publish-image:
+    # Push the built + checked image only after build is green, so the registry
+    # never holds an untested image.
+    depends_on:
+      - build
+    image: *docker-image
+    volumes: *docker-socket
+    environment:
+      REGISTRY_USER:
+        from_secret: zot_ci_user
+      REGISTRY_PASSWORD:
+        from_secret: zot_ci_password
+    commands:
+      - echo "$$REGISTRY_PASSWORD" | docker login registry.desync.link -u "$$REGISTRY_USER" --password-stdin
+      # Refuses to overwrite an existing version (pipeline numbers repeat if
+      # the repo is re-created in Woodpecker), then pushes :<version> and the
+      # same image as :commit-<sha> for deployments to find.
+      - ./scripts/publish-release-image.sh "$$(cat .release-tag)" "$$CI_COMMIT_SHA"

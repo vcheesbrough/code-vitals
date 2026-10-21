@@ -1,0 +1,45 @@
+[project]
+name = "code-vitals"
+# MAJOR.MINOR is the iteration (AGENTS.md); the patch is a placeholder. CI
+# replaces it with the push pipeline's number (scripts/compute-release-tag.sh).
+version = "0.1.0"
+description = "Measures of a project's code recorded at every trunk commit."
+readme = "README.md"
+license = "PolyForm-Noncommercial-1.0.0"
+license-files = ["LICENSE"]
+requires-python = "==3.13.*"
+dependencies = [
+    # Pinned exactly: a lizard upgrade changes measured values, so it is a
+    # measure version bump (AGENTS.md review criteria), never a silent update.
+    "lizard==1.24.1",
+]
+
+[project.scripts]
+code-vitals = "code_vitals.cli:main"
+
+[dependency-groups]
+dev = [
+    "mypy==2.4.0",
+    "pytest==9.1.1",
+    "ruff==0.17.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.7,<0.12"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.mypy]
+strict = true
+python_version = "3.13"
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"

@@ -51,7 +51,7 @@ def _tables(url: str) -> set[str]:
 
 
 def test_migrations_apply_from_empty_and_rerun_applies_nothing(fresh_db: str) -> None:
-    assert migrate(fresh_db, TEST_PASSWORDS) == ["0001_star_schema.sql"]
+    assert migrate(fresh_db, TEST_PASSWORDS) == [m.name for m in bundled_migrations()]
     tables = _tables(fresh_db)
     for expected in (
         "repo",
@@ -65,6 +65,7 @@ def test_migrations_apply_from_empty_and_rerun_applies_nothing(fresh_db: str) ->
         "current_measurement",
         "current_function_complexity",
         "freshness",
+        "commit_measure",
         "schema_migrations",
     ):
         assert expected in tables
@@ -89,7 +90,7 @@ def test_concurrent_runs_apply_each_migration_once(fresh_db: str) -> None:
         thread.join()
 
     assert errors == []
-    assert sorted(len(r) for r in results) == [0, 0, 1]
+    assert sorted(len(r) for r in results) == [0, 0, len(bundled_migrations())]
 
 
 def test_a_failing_migration_rolls_back_and_is_not_recorded(fresh_db: str, tmp_path: Path) -> None:

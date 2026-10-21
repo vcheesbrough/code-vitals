@@ -54,6 +54,26 @@ Ported from bored (its `.woodpecker/build.yml`, card #461):
   tag (same string as the version) is pushed only after a successful
   deployment.
 
+## Collecting
+
+```sh
+CODE_VITALS_DATABASE_URL=postgresql://code_vitals_writer:…@code-vitals-db:5432/code_vitals \
+  code-vitals collect --repo bored --clone /path/to/full/clone --trigger push
+```
+
+Records every trunk commit (first-parent history of the repo's trunk) not yet
+measured, for every registered measure version (`src/code_vitals/measures/`),
+into the database as the writer role. Safe to rerun, to run concurrently (a
+per-repo advisory lock), and to interrupt (each commit is one transaction; the
+next run finishes the rest). The measured repos and their trunks and version
+files are in `src/code_vitals/repos.py`.
+
+Telemetry is configured by the standard `OTEL_*` variables only — none set
+means off. In a deployment: `OTEL_EXPORTER_OTLP_ENDPOINT=http://monitor-alloy:4318`,
+`OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`,
+`OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=<env>`; the container must
+be on the stack network and `proxy-backend`.
+
 ## Database
 
 `code-vitals migrate` applies the schema (`src/code_vitals/db/migrations/`,

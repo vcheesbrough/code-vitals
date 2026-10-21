@@ -48,6 +48,8 @@ def _seed(url: str) -> None:
             " (2, 2, 1, 'Rust', 777),"  # backfilling measure version
             " (2, 1, NULL, '', 5)"  # unsplit row
         )
+        # The collector's done-markers (freshness reads them).
+        conn.execute("INSERT INTO commit_measure (commit_id, measure_id) VALUES (1, 1), (2, 1)")
 
 
 def test_current_measurement_shows_only_complete_versions_and_current_areas(db: str) -> None:
@@ -104,6 +106,7 @@ def test_freshness_reports_the_newest_recorded_commit_and_last_run(db: str) -> N
         "SELECT * FROM measurement",
         "SELECT * FROM commit",
         "SELECT * FROM current_measure",
+        "SELECT * FROM commit_measure",
         "INSERT INTO repo (name, trunk) VALUES ('x', 'main')",
     ],
 )

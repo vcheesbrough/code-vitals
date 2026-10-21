@@ -144,6 +144,15 @@ core, not saved for the `1.0.0` card, which is only the sign-off.
   data itself, not telemetry, because it also catches a collector that never
   ran.
 - Superset and Postgres are third-party and outside the product contract.
+- **How it is built** (card #494): `src/code_vitals/telemetry.py` is the only
+  module that imports the OpenTelemetry SDK or exporters
+  (`tests/test_boundaries.py`); product code emits through
+  `src/code_vitals/obs.py` (API only: instruments, attribute keys, span
+  helpers) and logs under the `code_vitals` logger — the OTLP log handler goes
+  there, never on the root logger (it deadlocks the flush when the collector is
+  down). OTLP over http/protobuf to `monitor-alloy:4318` on `proxy-backend` is
+  deliberate; a dedicated telemetry network was considered and rejected. The
+  Python binding is the observability skill's `references/python.md`.
 
 ### Deviations register
 

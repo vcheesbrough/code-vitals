@@ -10,6 +10,8 @@ import tomllib
 from dataclasses import dataclass
 from enum import StrEnum
 
+from code_vitals.areas import GENERIC, AreaRuleset, ruleset
+
 
 class VersionFile(StrEnum):
     """Where a repo has kept its version; the minor is the iteration."""
@@ -33,6 +35,7 @@ class RepoConfig:
     # Tried in order at each commit; the first that yields a version wins, so
     # a repo that moved its version keeps an iteration across the move.
     version_sources: tuple[VersionSource, ...]
+    areas: AreaRuleset = GENERIC
 
 
 CARGO_SOURCES = (
@@ -44,10 +47,41 @@ REPOS: dict[str, RepoConfig] = {
     # version.txt is older than [workspace.package] in v-note and has gone
     # stale (0.54 against Cargo's 0.69 on 2026-10-21), so Cargo comes first.
     "v-note": RepoConfig(
-        "v-note", "master", (*CARGO_SOURCES, VersionSource("version.txt", VersionFile.PLAIN))
+        "v-note",
+        "master",
+        (*CARGO_SOURCES, VersionSource("version.txt", VersionFile.PLAIN)),
+        ruleset(
+            1,
+            ("crates/**", "server"),  # the axum server and its protocol crate
+            ("frontend/**", "web"),
+            ("android/**", "android"),
+        ),
     ),
-    "bored": RepoConfig("bored", "main", CARGO_SOURCES),
-    "sovereign-config": RepoConfig("sovereign-config", "main", CARGO_SOURCES),
+    "bored": RepoConfig(
+        "bored",
+        "main",
+        CARGO_SOURCES,
+        ruleset(
+            1,
+            ("backend/**", "backend"),
+            ("frontend/**", "web"),
+            ("shared/**", "shared"),
+            ("mcp/**", "shared"),
+        ),
+    ),
+    "sovereign-config": RepoConfig(
+        "sovereign-config",
+        "main",
+        CARGO_SOURCES,
+        ruleset(
+            1,
+            ("crates/sovereign-config-server/**", "server"),
+            ("crates/sovereign-config-woodpecker-broker/**", "server"),
+            ("crates/sovereign-config-web/**", "web"),
+            ("crates/**", "libraries"),
+            ("proto/**", "libraries"),
+        ),
+    ),
 }
 
 _SEMVER = re.compile(r"^\s*v?(\d+)\.(\d+)\.(\d+)")

@@ -26,11 +26,13 @@ from pathlib import Path
 
 import psycopg
 from opentelemetry import trace
+from psycopg.types.json import Jsonb
 
 from code_vitals import obs
+from code_vitals.areas import AreaRuleset
 from code_vitals.build_info import BuildInfo
 from code_vitals.gitrepo import Clone
-from code_vitals.measures import CommitContext, Measure, Value, registered
+from code_vitals.measures import CommitContext, FunctionRow, Measure, Value, registered
 from code_vitals.repos import RepoConfig, iteration_of, pr_number_of, version_from
 
 log = logging.getLogger("code_vitals.collect")
@@ -38,8 +40,19 @@ Conn = psycopg.Connection[tuple[object, ...]]
 
 
 class MeasureDefinitionConflict(RuntimeError):
-    """A known (name, version) now has a different unit, kind or recomputability:
-    the definition changed without a version bump."""
+    """A known (name, version) now has a different unit, kind, recomputability
+    or definition: it changed without a version bump."""
+
+
+class AreaRulesetConflict(RuntimeError):
+    """A known ruleset version now has different rules: they changed without a
+    version bump."""
+
+
+@dataclass(frozen=True)
+class _Ruleset:
+    rules: AreaRuleset
+    area_ids: dict[str, int]
 
 
 @dataclass(frozen=True)
@@ -81,9 +94,19 @@ def collect(
                 head = clone.resolve_trunk(repo.trunk)
                 span.set_attribute(obs.HEAD_SHA, head)
                 measure_ids = _sync_measures(conn, measures)
+                ruleset = _sync_ruleset(conn, repo_id, repo.areas)
                 with _RepoLock(conn, repo.name):
                     result = _catch_up(
-                        conn, clone, repo, repo_id, run_id, head, measures, measure_ids, trigger
+                        conn,
+                        clone,
+                        repo,
+                        repo_id,
+                        run_id,
+                        head,
+                        measures,
+                        measure_ids,
+                        ruleset,
+                        trigger,
                     )
             except Exception:
                 log.exception("collect failed for %s", repo.name)
@@ -137,18 +160,51 @@ def _sync_measures(conn: Conn, measures: Sequence[Measure]) -> dict[tuple[str, i
                 (m.name, m.version, m.unit, str(m.kind), m.definition, m.recomputable),
             )
             row = conn.execute(
-                "SELECT id, unit, kind::text, recomputable FROM measure"
+                "SELECT id, unit, kind::text, recomputable, definition FROM measure"
                 " WHERE name = %s AND version = %s",
                 (m.name, m.version),
             ).fetchone()
         assert row is not None
-        if (row[1], row[2], row[3]) != (m.unit, str(m.kind), m.recomputable):
+        if (row[1], row[2], row[3], row[4]) != (m.unit, str(m.kind), m.recomputable, m.definition):
             raise MeasureDefinitionConflict(
                 f"measure {m.name} v{m.version} is recorded as unit={row[1]} kind={row[2]}"
-                f" recomputable={row[3]}; a changed definition needs a new version"
+                f" recomputable={row[3]} definition={row[4]!r}; a changed definition needs a"
+                " new version"
             )
         ids[(m.name, m.version)] = int(str(row[0]))
     return ids
+
+
+def _sync_ruleset(conn: Conn, repo_id: int, rules: AreaRuleset) -> _Ruleset:
+    with obs.db_span("INSERT", "register area ruleset"):
+        conn.execute(
+            "INSERT INTO area_ruleset (repo_id, version, rules) VALUES (%s, %s, %s)"
+            " ON CONFLICT (repo_id, version) DO NOTHING",
+            (repo_id, rules.version, Jsonb(rules.as_json())),
+        )
+        row = conn.execute(
+            "SELECT id, rules FROM area_ruleset WHERE repo_id = %s AND version = %s",
+            (repo_id, rules.version),
+        ).fetchone()
+        assert row is not None
+        if row[1] != rules.as_json():
+            raise AreaRulesetConflict(
+                f"area ruleset v{rules.version} is recorded with different rules;"
+                " changed rules need a new version"
+            )
+        ruleset_id = int(str(row[0]))
+        with conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO area (ruleset_id, name) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                [(ruleset_id, area) for area in rules.areas],
+            )
+        area_ids = {
+            str(name): int(str(area_id))
+            for area_id, name in conn.execute(
+                "SELECT id, name FROM area WHERE ruleset_id = %s", (ruleset_id,)
+            )
+        }
+    return _Ruleset(rules, area_ids)
 
 
 def lock_key(repo: str) -> str:
@@ -183,6 +239,7 @@ def _catch_up(
     head: str,
     measures: Sequence[Measure],
     measure_ids: dict[tuple[str, int], int],
+    ruleset: _Ruleset,
     trigger: obs.Trigger,
 ) -> RunResult:
     span = trace.get_current_span()
@@ -217,7 +274,7 @@ def _catch_up(
     measured = failed = 0
     for sha, missing in work:
         try:
-            _measure_commit(conn, clone, repo, repo_id, sha, missing, measure_ids, tags)
+            _measure_commit(conn, clone, repo, repo_id, sha, missing, measure_ids, ruleset, tags)
         except Exception:
             failed += 1
             log.exception(
@@ -243,18 +300,21 @@ def _measure_commit(
     sha: str,
     missing: Sequence[Measure],
     measure_ids: dict[tuple[str, int], int],
+    ruleset: _Ruleset,
     tags: dict[str, list[str]],
 ) -> None:
     with obs.tracer.start_as_current_span("commit", attributes={obs.COMMIT_SHA: sha}):
         info = clone.commit_info(sha)
         iteration = _iteration_at(clone, repo, sha)
         values: list[tuple[int, Value]] = []
+        functions: list[tuple[int, FunctionRow]] = []
         with tempfile.TemporaryDirectory(prefix="code-vitals-") as tmp:
             tree = clone.extract_tree(sha, Path(tmp))
             if tree.skipped:
                 log.info("skipped %d tree entries at %s", tree.skipped, sha)
-            context = CommitContext(repo.name, sha, tree.path, tree.files)
+            context = CommitContext(repo.name, sha, tree.path, tree.files, ruleset.rules)
             for m in missing:
+                measure_id = measure_ids[(m.name, m.version)]
                 started = time.monotonic()
                 with obs.tracer.start_as_current_span(
                     "measure",
@@ -262,10 +322,14 @@ def _measure_commit(
                 ):
                     produced = list(m.compute(context))
                 obs.MEASURE_DURATION.record(time.monotonic() - started, {obs.MEASURE: m.name})
-                for value in produced:
-                    if value.area is not None:
-                        raise NotImplementedError("area-split values need area rulesets (#495)")
-                    values.append((measure_ids[(m.name, m.version)], value))
+                for output in produced:
+                    area = output.area
+                    if area is not None and area not in ruleset.area_ids:
+                        raise ValueError(f"{m.name} produced unknown area {area!r}")
+                    if isinstance(output, FunctionRow):
+                        functions.append((measure_id, output))
+                    else:
+                        values.append((measure_id, output))
 
         with obs.db_span("INSERT", "record commit"), conn.transaction():
             row = conn.execute(
@@ -288,15 +352,41 @@ def _measure_commit(
             with conn.cursor() as cur:
                 cur.executemany(
                     "INSERT INTO measurement (commit_id, measure_id, area_id, facet, value)"
-                    " VALUES (%s, %s, NULL, %s, %s)"
+                    " VALUES (%s, %s, %s, %s, %s)"
                     " ON CONFLICT ON CONSTRAINT measurement_key DO NOTHING",
-                    [(commit_id, measure_id, v.facet, v.value) for measure_id, v in values],
+                    [
+                        (commit_id, measure_id, _area_id(ruleset, v.area), v.facet, v.value)
+                        for measure_id, v in values
+                    ],
+                )
+                cur.executemany(
+                    "INSERT INTO function_complexity (commit_id, measure_id, area_id, file,"
+                    " function, start_line, ccn, nloc, params)"
+                    " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
+                    [
+                        (
+                            commit_id,
+                            measure_id,
+                            ruleset.area_ids[f.area],
+                            f.file,
+                            f.function,
+                            f.start_line,
+                            f.ccn,
+                            f.nloc,
+                            f.params,
+                        )
+                        for measure_id, f in functions
+                    ],
                 )
                 cur.executemany(
                     "INSERT INTO commit_measure (commit_id, measure_id) VALUES (%s, %s)"
                     " ON CONFLICT DO NOTHING",
                     [(commit_id, measure_ids[(m.name, m.version)]) for m in missing],
                 )
+
+
+def _area_id(ruleset: _Ruleset, area: str | None) -> int | None:
+    return None if area is None else ruleset.area_ids[area]
 
 
 def _refresh_tags(

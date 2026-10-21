@@ -47,7 +47,11 @@ Shared skills apply here once the machine is wired up (`start-iteration`,
     any historical commit, or be flagged non-recomputable.
   - **Measure versioning** — any change that alters a measure's values (its
     logic, its area rules, or a pinned tool such as lizard or tokei) bumps that
-    measure's version.
+    measure's version; any change to a repo's area rules bumps that repo's
+    ruleset version. The collector enforces both: it refuses a known measure
+    version whose unit, kind, recomputability or definition changed, and a
+    known ruleset version whose rules changed. Tool-based definitions name the
+    tool version, so a tool bump trips the same check.
 
 ---
 

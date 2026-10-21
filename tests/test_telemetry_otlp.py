@@ -17,6 +17,7 @@ import psycopg
 import pytest
 
 from code_vitals.db.migrate import migrate
+from code_vitals.measures import registered
 from code_vitals.obs import METRIC_ATTRIBUTE_KEYS
 
 from .conftest import TEST_PASSWORDS, role_url
@@ -93,7 +94,8 @@ def test_all_three_signals_arrive_with_identity_and_correlation(
     (root,) = [s for s in spans if s.name == "collect"]
     assert attrs(root.attributes)["code_vitals.ci.pipeline.number"] == "42"
     assert attrs(root.attributes)["code_vitals.commits.measured"] == 3
-    assert names.count("commit") == 3 and names.count("measure") == 3
+    measures = len(registered())
+    assert names.count("commit") == 3 and names.count("measure") == 3 * measures
     assert "git cat-file" in names and "INSERT record commit" in names
     db = next(s for s in spans if s.name == "INSERT record commit")
     db_attributes = attrs(db.attributes)

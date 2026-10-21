@@ -74,6 +74,27 @@ means off. In a deployment: `OTEL_EXPORTER_OTLP_ENDPOINT=http://monitor-alloy:43
 `OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=<env>`; the container must
 be on the stack network and `proxy-backend`.
 
+## Measures
+
+All snapshot measures, recorded at every trunk commit and split by area
+(`src/code_vitals/repos.py` holds each repo's versioned area rules; shared
+excludes and test rules in `src/code_vitals/areas.py`):
+
+| Measure | Tool | Facet | What |
+| --- | --- | --- | --- |
+| `files` | git | — | regular files in the tree, unsplit |
+| `lines_of_code` | tokei | language | code lines (not comments or blanks) |
+| `source_files` | tokei | language | files tokei recognises |
+| `nloc` | lizard | — | non-comment lines of the files lizard analyses |
+| `functions` | lizard | — | functions and methods |
+| `complexity_total` | lizard | — | sum of cyclomatic complexity |
+| `functions_over_10` | lizard | — | functions with complexity over 10 |
+| `max_function_complexity` | lizard | — | the most complex function's complexity |
+| `function_complexity` | lizard | — | one row per function (hotspots), in `function_complexity` |
+
+Ratios are not stored: complexity per 1,000 lines is `complexity_total / nloc`
+(lizard's lines, as the prototype used), not over tokei's `lines_of_code`.
+
 ## Database
 
 `code-vitals migrate` applies the schema (`src/code_vitals/db/migrations/`,

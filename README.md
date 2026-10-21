@@ -52,3 +52,7 @@ Ported from bored (its `.woodpecker/build.yml`, card #461):
 - **Deployments** promote an already-published image and never rebuild; the git
   tag (same string as the version) is pushed only after a successful
   deployment.
+
+## License
+
+[PolyForm Noncommercial 1.0.0](LICENSE) — see [LICENSE-TIER.md](LICENSE-TIER.md).

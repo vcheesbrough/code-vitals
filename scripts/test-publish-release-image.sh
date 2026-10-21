@@ -24,6 +24,10 @@ if [ "\$1 \$2" = "manifest inspect" ]; then
         echo "Get https://registry.example/v2/: dial tcp: connection refused" >&2
         exit 1
     fi
+    if [ -f "$WORK_DIR/helper-missing" ]; then
+        echo "error getting credentials - err: exec: \"docker-credential-pass\": executable file not found in PATH" >&2
+        exit 1
+    fi
     grep -qx "\$3" "$WORK_DIR/registry" && exit 0
     echo "no such manifest: \$3" >&2
     exit 1
@@ -86,6 +90,21 @@ elif grep -q "could not tell whether" "$WORK_DIR/err" && ! grep -q "^push\|^tag"
 else
     fail "registry error: docker calls: $(cat "$WORK_DIR/docker-calls") / $(cat "$WORK_DIR/err")"
 fi
+
+# --- a probe error that merely contains "not found": refused ---------------
+# A missing credential helper says "executable file not found"; that is not the
+# registry saying the version is absent.
+rm -f "$WORK_DIR/registry-down"
+: > "$WORK_DIR/docker-calls"
+touch "$WORK_DIR/helper-missing"
+if PATH="$WORK_DIR/bin:$PATH" IMAGE_REPO="$REPO" sh "$UNDER_TEST" 0.1.341 "$SHA" > "$WORK_DIR/out" 2> "$WORK_DIR/err"; then
+    fail "credential helper error: expected a refusal"
+elif grep -q "could not tell whether" "$WORK_DIR/err" && ! grep -q "^push\|^tag" "$WORK_DIR/docker-calls"; then
+    pass "credential helper error in the probe: refused before any push"
+else
+    fail "credential helper error: docker calls: $(cat "$WORK_DIR/docker-calls") / $(cat "$WORK_DIR/err")"
+fi
+rm -f "$WORK_DIR/helper-missing"
 
 # --- missing arguments: refused -------------------------------------------
 if PATH="$WORK_DIR/bin:$PATH" sh "$UNDER_TEST" 0.1.341 > /dev/null 2>&1; then

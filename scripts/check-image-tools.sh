@@ -36,13 +36,27 @@ check() {
   esac
 }
 
+# check_exact <name> <expected> <actual> — the whole output must equal the pin,
+# so a pin of 1.24.1 does not accept 1.24.10.
+check_exact() {
+  if [ "$3" = "$2" ]; then
+    echo "  ok   $1: $3"
+  else
+    echo "  FAIL $1: expected exactly '$2', got '$3'" >&2
+    failures=$((failures + 1))
+  fi
+}
+
 run_in_image() {
   docker run --rm --entrypoint "$1" "$IMAGE" "$2" 2>&1 || true
 }
 
 echo "==> tools in $IMAGE"
-check tokei "tokei $tokei_version" "$(run_in_image tokei --version)"
-check lizard "$lizard_version" "$(run_in_image lizard --version)"
+# tokei appends build features ("compiled with serialization support: json"),
+# so match its first word pair exactly instead of the whole line.
+tokei_out=$(run_in_image tokei --version)
+check_exact tokei "tokei $tokei_version" "$(printf '%s\n' "$tokei_out" | head -n 1 | cut -d' ' -f1-2)"
+check_exact lizard "$lizard_version" "$(run_in_image lizard --version)"
 check git "git version" "$(run_in_image git --version)"
 
 version_out=$(docker run --rm "$IMAGE" --version 2>&1 || true)

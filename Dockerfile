@@ -36,11 +36,21 @@ RUN --mount=type=cache,id=code-vitals-uv-cache,target=/root/.cache/uv \
     uv sync --frozen
 COPY tests ./tests
 COPY scripts ./scripts
+COPY .woodpecker ./.woodpecker
+COPY deploy ./deploy
 COPY tool-versions.env ./
 RUN uv run --frozen ruff format --check \
     && uv run --frozen ruff check \
-    && uv run --frozen mypy \
-    && uv run --frozen pytest -q
+    && uv run --frozen mypy
+# The database tests need Postgres: one throwaway database per test, created on
+# the server the `database_url` secret names. The build runs under
+# scripts/with-test-postgres.sh, which starts that server beside it. A secret
+# rather than a build-arg so a new URL per run does not bust the layer cache,
+# `required=true` and CODE_VITALS_REQUIRE_DB=1 so a build without one fails
+# here instead of skipping those tests (bored's Dockerfile does the same).
+RUN --mount=type=secret,id=database_url,required=true \
+    CODE_VITALS_TEST_DATABASE_URL="$(cat /run/secrets/database_url)" CODE_VITALS_REQUIRE_DB=1 \
+    uv run --frozen pytest -q
 RUN for t in scripts/test-*.sh; do sh "$t" || exit 1; done \
     && touch /tests-passed
 

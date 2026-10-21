@@ -33,10 +33,12 @@ Shared skills apply here once the machine is wired up (`start-iteration`,
 
 - `OWNER=vcheesbrough`, `REPO=code-vitals`
 - CI reproduce commands (from the repo root):
-  - lint, types, tests: `uv sync && uv run ruff format --check && uv run ruff check && uv run mypy && uv run pytest`
+  - lint, types, tests (the database tests need a throwaway Postgres, which the
+    wrapper starts and removes):
+    `uv sync && uv run ruff format --check && uv run ruff check && uv run mypy && ./scripts/with-test-postgres.sh env CODE_VITALS_REQUIRE_DB=1 uv run pytest`
   - script tests: `for t in scripts/test-*.sh; do sh "$t"; done`
   - the image, exactly as CI builds it (runs every test above inside the build):
-    `. ./tool-versions.env && docker build --build-arg TOKEI_VERSION="$TOKEI_VERSION" --build-arg RELEASE_TAG=0.1.999 --build-arg GIT_REVISION=local --label org.opencontainers.image.version=0.1.999 --label org.opencontainers.image.revision=local --label org.opencontainers.image.created=now -t code-vitals-collector:local .`
+    `. ./tool-versions.env && ./scripts/with-test-postgres.sh docker build --secret id=database_url,env=CODE_VITALS_TEST_DATABASE_URL --build-arg TOKEI_VERSION="$TOKEI_VERSION" --build-arg RELEASE_TAG=0.1.999 --build-arg GIT_REVISION=local --label org.opencontainers.image.version=0.1.999 --label org.opencontainers.image.revision=local --label org.opencontainers.image.created=now -t code-vitals-collector:local .`
     then `scripts/check-image-metadata.sh code-vitals-collector:local 0.1.999 local` and
     `scripts/check-image-tools.sh code-vitals-collector:local 0.1.999 local`
 - Extra review criteria beyond the baseline five (correctness, security/OWASP,
@@ -75,6 +77,29 @@ The release flow is **bored's**, ported (its `.woodpecker/build.yml` and
   deployment, so it means "deployed".
 - Replacing these copied scripts with shared tooling is card #503.
 
+### Environments and promotion
+
+Two environments on mini, each its own compose project of `deploy/compose.yaml`:
+
+| | dev | prod |
+| --- | --- | --- |
+| Compose project / Postgres container | `code-vitals-dev` / `code-vitals-dev-postgres-1` | `code-vitals` / `code-vitals-postgres-1` |
+| Data volume | `code-vitals-dev-pg` | `code-vitals-prod-pg` |
+| Deployed by | Woodpecker *Deploy*, target `dev`, **any branch** (`.woodpecker/deploy-dev.yml`) | target `prod`, **`main` only**, enforced in `when:` (`.woodpecker/deploy-prod.yml`) |
+
+- **A push never deploys.** A deployment promotes the image the push already
+  published (resolved through the commit, then used by digest) and never
+  rebuilds. The git tag is pushed only after it succeeds.
+- **Prove a branch in dev before merging it.** Every dev deploy recreates the
+  dev database from a fresh `pg_dump` of prod (empty while prod isn't running),
+  then migrates it: the migration is tested on prod-shaped data and no row a
+  previous dev deploy wrote survives. Dev is disposable; never keep anything
+  there.
+- **Postgres publishes no port.** Migrations and the collector run as
+  containers on the project's network through the agent's docker socket.
+- `tests/test_pipelines.py` pins the gates: prod only from `main`, dev only to
+  dev, a push never deploys, every step image pinned by digest.
+
 ### Planning vs implementation (scope gate)
 
 Cards in **TODO / backlog** are **spec only** until moved to **In progress**.
@@ -105,6 +130,19 @@ core, not saved for the `1.0.0` card, which is only the sign-off.
 - Superset and Postgres are third-party and outside the product contract.
 
 ### Deviations register
+
+- **Deploy secrets via `from_secret`, not `sovereign-config render`.** bored's
+  deploy reads its compose layer through a read-only sovereign-config
+  connection. That connection can only be created through the sovereign-config
+  MCP, which returns its URL into the agent transcript (baseline §7), so the
+  deploy's secrets (`code_vitals_{dev,prod}_{postgres,writer,reader}_password`)
+  live in the broker's per-repo layer
+  `/woodpecker/repos/vcheesbrough/code-vitals/` and reach the steps through
+  `from_secret`, as sovereign-config's own deploy does. They were generated with
+  `openssl rand -hex 32 | sovereign-config set … --secret`, never displayed. To
+  move to `render`: create a read-only `code-vitals-devops` connection rooted at
+  `/code-vitals/devops` by hand, store its URL in the per-repo layer, and move
+  the values under `/code-vitals/devops/<env>/compose`.
 
 - **`service.instance.id` is the measured repo, not the hostname.** Each
   Woodpecker step is a fresh container with a random hostname, which would

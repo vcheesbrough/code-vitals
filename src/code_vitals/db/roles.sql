@@ -28,7 +28,7 @@ GRANT USAGE ON SCHEMA public TO code_vitals_writer, code_vitals_reader;
 
 GRANT SELECT, INSERT, UPDATE
     ON repo, commit, measure, area_ruleset, area, measurement, function_complexity, run,
-       commit_measure
+       commit_measure, measure_backfill
     TO code_vitals_writer;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO code_vitals_writer;
 

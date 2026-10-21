@@ -68,6 +68,29 @@ per-repo advisory lock), and to interrupt (each commit is one transaction; the
 next run finishes the rest). The measured repos and their trunks and version
 files are in `src/code_vitals/repos.py`.
 
+A run with no failed commit records that the repo is caught up on every
+version it ran (`measure_backfill`). A version turns `complete` once every
+repo has caught up on it, and a repo's area ruleset once a run under it
+succeeds; that is when the `current_*` views switch to them. A
+non-recomputable measure version is recorded only at commits from its
+release on (`measure_recomputable` and `measure_released_at` in
+`current_measurement` mark the break).
+
+Every deployment runs this over every repo with the deployed image, then
+checks (`scripts/run-collector.sh`):
+
+- `code-vitals check-repo --repo R --clone P` — a second catch-up finds
+  nothing to do, and the values at the fixed commits of
+  `src/code_vitals/expected_values.toml` are exactly those recorded. A change
+  that alters values bumps the measure's version and updates the table in the
+  same PR; on a mismatch the command prints the recorded entries to paste.
+- `code-vitals check-status` — every version this build registers, and every
+  repo's ruleset, is `complete`, and every repo's last run succeeded.
+
+`code-vitals retire <measure> <version> [--delete-rows]` retires a version this
+build no longer registers: it leaves the views; `--delete-rows` also deletes
+its rows, as the owner.
+
 Telemetry is configured by the standard `OTEL_*` variables only — none set
 means off. In a deployment: `OTEL_EXPORTER_OTLP_ENDPOINT=http://monitor-alloy:4318`,
 `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`,
@@ -115,7 +138,7 @@ get their login.
 
 | Role | May |
 | --- | --- |
-| `code_vitals` (owner) | everything; used only by `migrate` |
+| `code_vitals` (owner) | everything; used only by `migrate` and `retire --delete-rows` |
 | `code_vitals_writer` (the collector) | read, insert and update the tables; never alter, drop, delete or create |
 | `code_vitals_reader` (Superset) | `SELECT` on `current_measurement`, `current_function_complexity` and `freshness` only |
 
@@ -136,8 +159,11 @@ Apache Superset 6.1.0 plus the Postgres driver, authlib and
 
 A Woodpecker *Deploy* of a commit, with target `dev` (any branch) or `prod`
 (`main` only), promotes the image its push already published and never
-rebuilds. Each dev deploy starts from a fresh copy of prod. See AGENTS.md
-§ Environments and promotion.
+rebuilds. Each dev deploy starts from a fresh copy of prod. After migrating,
+it collects and checks every repo (§ Collecting), so a bumped measure version
+backfills in dev from the branch and in prod on release. A prod deploy moves
+`code-vitals-collector:stable` — what the measured repos' push workflows run —
+last, once its checks passed. See AGENTS.md § Environments and promotion.
 
 ## License
 

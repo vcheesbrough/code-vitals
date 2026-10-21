@@ -79,6 +79,26 @@ def test_the_view_switches_when_the_new_version_completes(db: str) -> None:
     assert values == [777.0]
 
 
+def test_a_retired_version_leaves_the_view_for_the_next_complete_one(db: str) -> None:
+    _seed(db)
+    with psycopg.connect(db) as conn:
+        conn.execute("UPDATE measure SET status = 'complete' WHERE id = 2")
+        conn.execute("UPDATE measure SET status = 'retired' WHERE id = 2")
+        versions = {r[0] for r in conn.execute("SELECT measure_version FROM current_measurement")}
+    assert versions == {1}
+
+
+def test_current_measurement_carries_what_marks_a_non_recomputable_break(db: str) -> None:
+    _seed(db)
+    with psycopg.connect(db) as conn:
+        conn.execute("UPDATE measure SET recomputable = false, released_at = '2026-10-05T00:00Z'")
+        rows = conn.execute(
+            "SELECT DISTINCT measure_recomputable, measure_released_at::date::text"
+            " FROM current_measurement"
+        ).fetchall()
+    assert rows == [(False, "2026-10-05")]
+
+
 def test_measurement_is_unique_over_all_but_the_value(db: str) -> None:
     _seed(db)
     with psycopg.connect(db) as conn:
@@ -110,6 +130,7 @@ def test_freshness_reports_the_newest_recorded_commit_and_last_run(db: str) -> N
         "SELECT * FROM commit",
         "SELECT * FROM current_measure",
         "SELECT * FROM commit_measure",
+        "SELECT * FROM measure_backfill",
         "INSERT INTO repo (name, trunk) VALUES ('x', 'main')",
     ],
 )
@@ -148,6 +169,7 @@ def test_writer_reads_and_writes_tables(db: str) -> None:
         "TRUNCATE measurement",
         "CREATE TABLE sneaky (id int)",
         "DELETE FROM measurement",
+        "DELETE FROM measure_backfill",
     ],
 )
 def test_writer_cannot_drop_alter_or_create(db: str, statement: str) -> None:

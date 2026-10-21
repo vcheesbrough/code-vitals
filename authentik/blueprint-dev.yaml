@@ -37,6 +37,11 @@ entries:
       client_id: code-vitals-dev
       client_secret: ${AUTHENTIK_CODE_VITALS_DEV_CLIENT_SECRET}
       client_type: confidential
+      # Authentik 2026.x defaults grant_types to an empty list, which refuses
+      # every authorize request as "otherwise malformed". Superset only uses
+      # the authorization code grant (no refresh tokens).
+      grant_types:
+        - authorization_code
       access_token_validity: minutes=15
       redirect_uris:
         - url: "https://code-vitals-dev.desync.link/oauth-authorized/authentik"

@@ -105,6 +105,26 @@ def test_the_superset_image_is_published_before_the_collector() -> None:
     assert superset < collector
 
 
+@pytest.mark.parametrize("name", ["blueprint.yaml", "blueprint-dev.yaml"])
+def test_every_oauth2_provider_allows_the_authorization_code_grant(name: str) -> None:
+    # Authentik 2026.x defaults grant_types to an empty list, which refuses
+    # every authorize request; Superset needs the authorization code grant.
+    class Loader(yaml.SafeLoader):
+        pass
+
+    def find(loader: yaml.SafeLoader, node: yaml.Node) -> list[Any]:
+        assert isinstance(node, yaml.SequenceNode)
+        return loader.construct_sequence(node)
+
+    Loader.add_constructor("!Find", find)
+    path = Path(__file__).resolve().parent.parent / "authentik" / name
+    entries = yaml.load(path.read_text(), Loader=Loader)["entries"]
+    providers = [e for e in entries if e["model"] == "authentik_providers_oauth2.oauth2provider"]
+    assert providers
+    for provider in providers:
+        assert provider["attrs"]["grant_types"] == ["authorization_code"], provider["attrs"]["name"]
+
+
 def test_a_push_never_deploys() -> None:
     for clause in _when(_workflow("build.yml")):
         events = clause["event"]

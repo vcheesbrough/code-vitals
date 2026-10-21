@@ -19,8 +19,8 @@ def test_history_is_first_parent_oldest_first(tmp_path: Path) -> None:
 
     history = Clone(repo.path).first_parent_history(merge)
 
-    assert history == [first, second, merge]
-    assert side not in history
+    assert history == [(first, None), (second, first), (merge, second)]
+    assert side not in {sha for sha, _ in history}
 
 
 def test_trunk_prefers_the_remote_tracking_branch(tmp_path: Path) -> None:

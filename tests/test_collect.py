@@ -14,6 +14,7 @@ from code_vitals.build_info import BuildInfo
 from code_vitals.collect import AreaRulesetConflict, MeasureDefinitionConflict, collect, lock_key
 from code_vitals.db.migrate import migrate
 from code_vitals.measures import CommitContext, Kind, Measure, Value, registered
+from code_vitals.measures.churn import LinesAdded
 from code_vitals.measures.complexity import FunctionHotspots, Functions
 from code_vitals.measures.files import Files
 from code_vitals.obs import Outcome, Trigger
@@ -437,3 +438,32 @@ def test_the_hotspot_view_shows_areas_of_the_current_ruleset_only(
             " SELECT repo_id, 2, '{}', 'complete' FROM area_ruleset"
         )
     assert _rows(owner, "SELECT count(*) FROM current_function_complexity") == [(0,)]
+
+
+def test_churn_per_commit_follows_the_first_parent_through_a_merge(
+    db: tuple[str, str], tmp_path: Path
+) -> None:
+    owner, writer = db
+    repo = make_repo(tmp_path)
+    c1 = repo.commit("one", {"a.py": "1\n2\n"})
+    repo.git("switch", "-q", "-c", "feature")
+    repo.commit("side 1", {"b.py": "1\n2\n3\n"})
+    repo.commit("side 2", {"b.py": "1\n2\n3\n4\n"})
+    repo.git("switch", "-q", "main")
+    c2 = repo.commit("two", {"a.py": "1\n"})
+    repo.git("merge", "-q", "--no-ff", "-m", "merge feature", "feature")
+    merge = repo.git("rev-parse", "HEAD")
+    config = _config(AreaRuleset(1, (), (("**", "tooling"),)))
+
+    collect(writer, config, repo.path, Trigger.BACKFILL, BUILD, measures=[LinesAdded()])
+
+    added: dict[object, object] = {
+        sha: value
+        for sha, value in _rows(
+            owner,
+            "SELECT c.sha, x.value FROM measurement x JOIN commit c ON c.id = x.commit_id",
+        )
+    }
+    # The merge brings in the whole feature branch against its first parent;
+    # the side commits are not on the first-parent history at all.
+    assert added == {c1: 2.0, c2: 0.0, merge: 4.0}  # c2 only deletes a line

@@ -137,3 +137,40 @@ def test_a_rule_change_changes_the_definition(monkeypatch: pytest.MonkeyPatch) -
     changed = {**functionality.OPERATIONS, "v-note": ()}
     assert functionality._digest(changed) != before
     assert before in functionality.Operations.definition
+
+
+def test_churn_ignores_the_clones_gitattributes(tmp_path: Path) -> None:
+    # A checked-out `-diff` attribute would make numstat report `- -` for the
+    # file; values must depend on the commit's objects only.
+    repo = make_repo(tmp_path)
+    first = repo.commit("one", {"app/x.txt": "a\nb\n"})
+    second = repo.commit("two", {".gitattributes": "*.txt -diff\n", "app/x.txt": "a\nb\nc\n"})
+    changes = {c.path: c for c in Clone(repo.path).changes(first, second)}
+    assert (changes["app/x.txt"].added, changes["app/x.txt"].deleted) == (1, 0)
+    assert not changes["app/x.txt"].binary
+
+
+def test_binary_detection_is_by_content(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path)
+    (repo.path / "img.bin").write_bytes(b"\x00\x01\x02\n")
+    repo.git("add", "img.bin")
+    sha = repo.commit("bin", {"t.txt": "no newline at end"})
+    changes = {c.path: c for c in Clone(repo.path).changes(None, sha)}
+    assert changes["img.bin"].binary and changes["img.bin"].added == 0
+    assert (changes["t.txt"].added, changes["t.txt"].binary) == (1, False)
+
+
+def test_a_shallow_clone_is_refused(tmp_path: Path) -> None:
+    import subprocess
+
+    from code_vitals.gitrepo import GitError
+
+    repo = make_repo(tmp_path)
+    repo.commit("one", {"a": "1\n"})
+    repo.commit("two", {"a": "2\n"})
+    shallow = tmp_path / "shallow"
+    subprocess.run(
+        ["git", "clone", "-q", "--depth", "1", f"file://{repo.path}", str(shallow)], check=True
+    )
+    with pytest.raises(GitError, match="shallow clone"):
+        Clone(shallow).first_parent_history("HEAD")

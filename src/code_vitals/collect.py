@@ -244,7 +244,9 @@ def _catch_up(
     trigger: obs.Trigger,
 ) -> RunResult:
     span = trace.get_current_span()
-    history = clone.first_parent_history(head)
+    history_with_parents = clone.first_parent_history(head)
+    history = [sha for sha, _ in history_with_parents]
+    parents = dict(history_with_parents)
     with obs.db_span("SELECT", "done markers"):
         done = {
             (str(sha), int(str(measure_id)))
@@ -273,8 +275,6 @@ def _catch_up(
     # Every run, not only for new commits: a release tag is pushed after the
     # deploy, i.e. after the push-time run already measured its commit.
     tags = clone.tags_by_commit()
-    # First-parent history: each commit's parent is the one before it.
-    parents = dict(zip(history[1:], history[:-1], strict=True))
     measured = failed = 0
     for sha, missing in work:
         try:

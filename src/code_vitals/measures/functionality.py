@@ -100,14 +100,14 @@ def _digest(rules: object) -> str:
 _SERVICE = re.compile(r"^\s*service\s+(\w+)\s*\{", re.MULTILINE)
 
 
-def _rpcs(text: str) -> list[str]:
-    """`Service.Method` for every rpc in a proto file."""
+def _rpcs(text: str, pattern: str) -> list[str]:
+    """`Service.Method` for every rpc `pattern` (group 1 = method) matches."""
     found = []
     service = ""
     for line in text.splitlines():
         if m := _SERVICE.match(line):
             service = m[1]
-        elif m := re.match(GRPC_RPC, line):
+        elif m := re.match(pattern, line):
             found.append(f"{service}.{m[1]}")
     return found
 
@@ -127,15 +127,15 @@ class Operations:
     def compute(self, context: CommitContext) -> Sequence[Value]:
         counts: Counter[tuple[str, str]] = Counter()
         for rule in OPERATIONS.get(context.repo, ()):
-            seen: set[str] = set()
+            seen: set[tuple[str, str]] = set()  # (area, Service.Method)
             for path, text in context.text_files(rule.glob):
                 area = context.area_of(path)
                 if area is None or area == TESTS:
                     continue
                 if rule.distinct_rpc:
-                    for rpc in _rpcs(text):
-                        if rpc not in seen:
-                            seen.add(rpc)
+                    for rpc in _rpcs(text, rule.pattern):
+                        if (area, rpc) not in seen:
+                            seen.add((area, rpc))
                             counts[(area, rule.kind)] += 1
                 else:
                     counts[(area, rule.kind)] += len(re.findall(rule.pattern, text, re.MULTILINE))

@@ -11,7 +11,8 @@
 # [<repo>.commits.<sha>.<measure>] version = the measure version written for,
 #                                  then one value per row: "<area>/<facet>",
 #                                  "-" for no area, no "/<facet>" when unsplit.
-# Every registered measure is listed at every commit, even with no values.
+# Every recomputable registered measure is listed at every commit, even with
+# no values; a non-recomputable one cannot be pinned (checks.fixed_value_measures).
 
 [v-note]
 ruleset = 1

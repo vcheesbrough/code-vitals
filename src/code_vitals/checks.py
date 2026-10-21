@@ -5,6 +5,7 @@
   those in expected_values.toml. Commits never change, so neither may their
   values: a change that alters them bumps the measure's version, and the same
   PR updates the table, so every change in numbers is reviewed.
+  Non-recomputable measures are not in the table (fixed_value_measures).
 - check_status, once every repo is collected: every version this build
   registers is `complete` (so the views show it), and every repo's last run
   succeeded.
@@ -106,6 +107,14 @@ def check_repo(
     return problems
 
 
+def fixed_value_measures(measures: Sequence[Measure]) -> list[Measure]:
+    """The measures the table pins. A non-recomputable one is recorded only
+    from its release on, which each database dates differently, so no fixed
+    commit has a value every database agrees on; check_status and the second
+    catch-up still cover it."""
+    return [m for m in measures if m.recomputable]
+
+
 def _check_values(
     conninfo: str,
     repo: RepoConfig,
@@ -120,11 +129,12 @@ def _check_values(
             f"expected_values.toml was written for {repo.name}'s area ruleset"
             f" v{expected.ruleset}; this build has v{repo.areas.version}: update the table"
         )
+    fixed = fixed_value_measures(measures)
     with psycopg.connect(conninfo) as conn:
         for sha, by_name in expected.commits.items():
             actual: dict[str, dict[RowKey, float]] = {}
             wrong = []
-            for m in measures:
+            for m in fixed:
                 rows = _recorded(conn, repo, sha, m)
                 if rows is None:
                     problems.append(f"{repo.name} {sha}: {m.name} v{m.version} is not recorded")
@@ -139,8 +149,8 @@ def _check_values(
                     )
                 elif not _same(want.values, rows):
                     wrong.append(f"{m.name} v{m.version}: {_difference(want.values, rows)}")
-            unknown = sorted(set(by_name) - {m.name for m in measures})
-            wrong += [f"{name} is not a registered measure" for name in unknown]
+            unknown = sorted(set(by_name) - {m.name for m in fixed})
+            wrong += [f"{name} is not a recomputable registered measure" for name in unknown]
             if wrong:
                 problems.append(
                     f"{repo.name} {sha} differs from expected_values.toml:\n  "

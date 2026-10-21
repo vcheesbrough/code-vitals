@@ -10,7 +10,13 @@ import pytest
 from code_vitals import checks, cli
 from code_vitals.areas import ruleset
 from code_vitals.build_info import BuildInfo
-from code_vitals.checks import check_repo, check_status, load_expected, render
+from code_vitals.checks import (
+    check_repo,
+    check_status,
+    fixed_value_measures,
+    load_expected,
+    render,
+)
 from code_vitals.collect import collect
 from code_vitals.db.migrate import migrate
 from code_vitals.measures import Measure, registered
@@ -20,7 +26,7 @@ from code_vitals.repos import REPOS, RepoConfig, VersionFile, VersionSource
 
 from .conftest import TEST_PASSWORDS, role_url
 from .gitfixture import FixtureRepo, three_commit_history
-from .test_collect import Empty
+from .test_collect import Empty, Snapshot
 
 BUILD = BuildInfo(version="0.7.99", revision="abc123")
 FIXTURE = RepoConfig("fixture", "main", (VersionSource("pyproject.toml", VersionFile.PYPROJECT),))
@@ -157,6 +163,21 @@ def test_a_repo_without_fixed_commits_fails(db: tuple[str, str], repo: FixtureRe
     assert problems == ["expected_values.toml has no fixed commits for fixture"]
 
 
+def test_a_non_recomputable_measure_is_not_pinned_at_the_fixed_commits(
+    db: tuple[str, str], repo: FixtureRepo
+) -> None:
+    _, writer = db
+    # Released now, so never recorded at the fixture's (earlier) commits; nor
+    # could the table hold a value every database agrees on.
+    measures: list[Measure] = [Files(), Snapshot()]
+    collect(writer, FIXTURE, repo.path, Trigger.BACKFILL, BUILD, measures=measures)
+    problems = check_repo(
+        writer, FIXTURE, repo.path, BUILD, measures=measures, expected=load_expected(_table(repo))
+    )
+    assert problems == []
+    assert check_status(writer, [FIXTURE], measures=measures) == []
+
+
 def test_status_passes_once_every_repo_is_collected(db: tuple[str, str], repo: FixtureRepo) -> None:
     _, writer = db
     _collected(writer, repo)
@@ -193,7 +214,7 @@ def test_status_fails_on_incomplete_versions_and_failed_or_missing_runs(
 
 def test_the_bundled_table_covers_every_repo_and_measure_this_build_has() -> None:
     table = load_expected()
-    measures = registered()
+    measures = fixed_value_measures(registered())
     assert set(table) == set(REPOS)
     for name, repo in REPOS.items():
         assert table[name].ruleset == repo.areas.version

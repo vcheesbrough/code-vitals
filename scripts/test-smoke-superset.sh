@@ -30,7 +30,8 @@ cat > "$WORK_DIR/bin/docker" <<EOF
 #!/bin/sh
 echo "\$* PGPASSWORD=\${PGPASSWORD:-}" >> "$WORK_DIR/docker-calls"
 for last; do :; done
-grep -qxF "\$last" "$WORK_DIR/denied" && { echo "ERROR:  permission denied" >&2; exit 1; }
+grep -qxF "\$last" "$WORK_DIR/denied" && { echo "ERROR:  permission denied for table repo" >&2; exit 1; }
+grep -qxF "\$last" "$WORK_DIR/missing" 2>/dev/null && { echo "ERROR:  relation \"repo\" does not exist" >&2; exit 1; }
 echo 3
 EOF
 chmod +x "$WORK_DIR/bin/curl" "$WORK_DIR/bin/docker"
@@ -89,6 +90,11 @@ if run; then fail "reader reads base table: expected failure"; elif grep -q "can
 
 setup OK "$GOOD_LOGIN" "SELECT count(*) FROM freshness" "SELECT 1 FROM repo LIMIT 1"
 if run; then fail "reader cannot read view: expected failure"; elif grep -q "cannot read the freshness view" "$WORK_DIR/out"; then pass "a reader that cannot read the view fails"; else fail "view: $(cat "$WORK_DIR/out")"; fi
+
+setup OK "$GOOD_LOGIN"
+echo "SELECT 1 FROM repo LIMIT 1" > "$WORK_DIR/missing"
+if run; then fail "missing table: expected failure"; elif grep -q "not with a permission denial" "$WORK_DIR/out"; then pass "a base-table error other than a permission denial fails"; else fail "missing table: $(cat "$WORK_DIR/out")"; fi
+rm -f "$WORK_DIR/missing"
 
 if PATH="$WORK_DIR/bin:$PATH" sh "$UNDER_TEST" staging > /dev/null 2>&1; then fail "unknown env: expected refusal"; else pass "unknown environment refused"; fi
 

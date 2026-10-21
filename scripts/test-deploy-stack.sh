@@ -82,7 +82,7 @@ else
     fail "superset order: migrate=$migrate role=$role init=$init up=$up / calls: $(calls)"
 fi
 
-if grep -q "^compose env=prod host=code-vitals.desync.link image=$SUPERSET reader=postgresql+psycopg2://code_vitals_reader:rpw@postgres:5432/code_vitals$" "$WORK_DIR/compose-env" \
+if grep -q "^compose env=prod host=code-vitals.desync.link image=$SUPERSET reader=postgresql+psycopg2://code_vitals_reader:rpw@code-vitals-db:5432/code_vitals$" "$WORK_DIR/compose-env" \
     && grep -qx "superset_pw=sdbpw" "$WORK_DIR/exec-env" \
     && grep -q "CREATE DATABASE superset OWNER superset" "$WORK_DIR"/stdin-* \
     && ! grep -q "sdbpw" "$WORK_DIR"/stdin-*; then
@@ -91,7 +91,7 @@ else
     fail "superset env: $(cat "$WORK_DIR/compose-env") / $(cat "$WORK_DIR/exec-env")"
 fi
 
-if grep -qx "url=postgresql://code_vitals:pgpw0123@postgres:5432/code_vitals" "$WORK_DIR/run-env" \
+if grep -qx "url=postgresql://code_vitals:pgpw0123@code-vitals-db:5432/code_vitals" "$WORK_DIR/run-env" \
     && ! calls | grep -q "pgpw0123\|wpw\|rpw\|sskey123\|sdbpw\|ocsecret9"; then
     pass "secrets reach migrate through its environment, never a command line"
 else

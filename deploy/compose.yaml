@@ -20,6 +20,14 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
       - pg:/var/lib/postgresql/data
+    networks:
+      default:
+        # The name every client uses (CODE_VITALS_DB_HOST, from
+        # scripts/deploy-stack.sh): unique to this project, so a client that
+        # is also on a shared network can never reach another stack's
+        # `postgres`.
+        aliases:
+          - ${CODE_VITALS_DB_HOST:?CODE_VITALS_DB_HOST is required}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U code_vitals -d code_vitals"]
       interval: 5s
@@ -37,6 +45,7 @@ services:
         condition: service_healthy
     environment: &superset-env
       CODE_VITALS_ENV: ${CODE_VITALS_ENV:?CODE_VITALS_ENV is required}
+      CODE_VITALS_DB_HOST: ${CODE_VITALS_DB_HOST:?CODE_VITALS_DB_HOST is required}
       SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:?SUPERSET_SECRET_KEY is required}
       SUPERSET_DB_PASSWORD: ${SUPERSET_DB_PASSWORD:?SUPERSET_DB_PASSWORD is required}
       AUTHENTIK_CLIENT_SECRET: ${AUTHENTIK_CLIENT_SECRET:?AUTHENTIK_CLIENT_SECRET is required}

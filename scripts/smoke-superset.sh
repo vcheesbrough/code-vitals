@@ -82,9 +82,17 @@ if ! reader 'SELECT count(*) FROM freshness' > /dev/null; then
   echo "ERROR: the reader role cannot read the freshness view" >&2
   exit 1
 fi
-if reader 'SELECT 1 FROM repo LIMIT 1' > /dev/null 2>&1; then
+if denied=$(reader 'SELECT 1 FROM repo LIMIT 1' 2>&1); then
   echo "ERROR: the reader role can read a base table" >&2
   exit 1
 fi
+# Any other error (a missing table, a failed connection) proves nothing.
+case "$denied" in
+  *"permission denied"*) ;;
+  *)
+    echo "ERROR: reading a base table as the reader failed, but not with a permission denial: $denied" >&2
+    exit 1
+    ;;
+esac
 echo "  ok"
 echo "==> $env: superset smoke checks passed"

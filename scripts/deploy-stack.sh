@@ -48,7 +48,11 @@ container="$project-postgres-1"
 PG_VOLUME="code-vitals-$env-pg"
 CODE_VITALS_ENV="$env"
 SUPERSET_HOST="$project.desync.link"
-export PG_VOLUME CODE_VITALS_ENV SUPERSET_HOST SUPERSET_IMAGE
+# Postgres's alias on the project network (deploy/compose.yaml): clients use it
+# rather than `postgres`, which another stack could also answer to on a shared
+# network.
+CODE_VITALS_DB_HOST="$project-db"
+export PG_VOLUME CODE_VITALS_ENV SUPERSET_HOST SUPERSET_IMAGE CODE_VITALS_DB_HOST
 
 for name in POSTGRES_PASSWORD CODE_VITALS_WRITER_PASSWORD CODE_VITALS_READER_PASSWORD \
   SUPERSET_SECRET_KEY SUPERSET_DB_PASSWORD AUTHENTIK_CLIENT_SECRET; do
@@ -93,7 +97,7 @@ if [ "$env" = dev ]; then
 fi
 
 echo "==> $env: migrate"
-CODE_VITALS_DATABASE_URL="postgresql://code_vitals:$POSTGRES_PASSWORD@postgres:5432/code_vitals"
+CODE_VITALS_DATABASE_URL="postgresql://code_vitals:$POSTGRES_PASSWORD@$CODE_VITALS_DB_HOST:5432/code_vitals"
 export CODE_VITALS_DATABASE_URL
 # `-e NAME` copies each value from this environment, so no secret appears on a
 # command line (`ps` on the agent host) or in the step log.
@@ -121,7 +125,7 @@ SQL
 unset SUPERSET_NEW_PASSWORD
 
 echo "==> $env: superset bootstrap"
-CODE_VITALS_READER_URI="postgresql+psycopg2://code_vitals_reader:$CODE_VITALS_READER_PASSWORD@postgres:5432/code_vitals"
+CODE_VITALS_READER_URI="postgresql+psycopg2://code_vitals_reader:$CODE_VITALS_READER_PASSWORD@$CODE_VITALS_DB_HOST:5432/code_vitals"
 export CODE_VITALS_READER_URI
 compose --profile init run --rm --pull "$pull" superset-init
 unset CODE_VITALS_READER_URI

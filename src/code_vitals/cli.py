@@ -6,6 +6,7 @@ OTLP), when the OTEL_* variables configure it.
 """
 
 import argparse
+import logging
 import os
 import sys
 from collections.abc import Mapping, Sequence
@@ -82,6 +83,7 @@ def main(
     if not conninfo:
         print(f"code-vitals {args.command}: {DATABASE_URL_ENV} is required", file=sys.stderr)
         return 2
+    _log_problems_to_stderr()
     instance = args.repo if args.command == "collect" else args.command
     try:
         running = telemetry.setup(environ, info, instance)
@@ -97,6 +99,19 @@ def main(
     finally:
         if not running.shutdown():
             print("code-vitals: telemetry did not flush in time; some was dropped", file=sys.stderr)
+
+
+def _log_problems_to_stderr() -> None:
+    """Warnings and errors (with tracebacks) also reach the CI step log, in
+    plain text, whether or not telemetry is on; INFO records go to OTLP only."""
+    product = logging.getLogger(telemetry.PRODUCT_LOGGER)
+    if any(getattr(h, "code_vitals_stderr", False) for h in product.handlers):
+        return
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setLevel(logging.WARNING)
+    handler.setFormatter(logging.Formatter("code-vitals: %(levelname)s %(name)s: %(message)s"))
+    handler.code_vitals_stderr = True  # type: ignore[attr-defined]
+    product.addHandler(handler)
 
 
 def _migrate(conninfo: str, environ: Mapping[str, str]) -> int:
@@ -136,4 +151,11 @@ def _collect(
         f"code-vitals collect: {repo.name}: {result.commits_measured} commit(s) measured"
         f" of {result.backlog} to do (run {result.run_id})"
     )
+    if result.commits_failed:
+        print(
+            f"code-vitals collect: {repo.name}: {result.commits_failed} commit(s) failed;"
+            " the next run retries them",
+            file=sys.stderr,
+        )
+        return 1
     return 0

@@ -5,7 +5,6 @@ mounted read-only. Every git call runs in its own span.
 """
 
 import subprocess
-import tarfile
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
@@ -30,7 +29,7 @@ class CommitInfo:
 class ExtractedTree:
     path: Path
     files: int
-    skipped: int  # members refused as unsafe (absolute paths, links escaping the tree …)
+    skipped: int  # entries not written: submodules, unsafe paths, links leaving the tree
 
 
 class Clone:
@@ -105,32 +104,73 @@ class Clone:
         return result.stdout if result.returncode == 0 else None
 
     def extract_tree(self, sha: str, dest: Path) -> ExtractedTree:
-        """The commit's tree as files under `dest`, via `git archive` streamed
-        into tarfile with the `data` filter; members it refuses are skipped."""
-        files = 0
+        """The commit's tree as files under `dest`, exactly as recorded in git.
+
+        Read with `ls-tree` and `cat-file --batch` rather than `git archive`,
+        which applies the measured repo's `.gitattributes` (`export-ignore`,
+        `export-subst`) and would make measured values depend on export
+        settings. Symlinks are recreated only when they stay inside the tree;
+        others, and submodules, are skipped (counted)."""
+        with obs.git_span("ls-tree"):
+            listing = subprocess.run(
+                ["git", "-C", str(self.path), "ls-tree", "-r", "-z", "--full-tree", sha],
+                capture_output=True,
+                check=False,
+            )
+        if listing.returncode != 0:
+            raise GitError(f"git ls-tree {sha} failed: {listing.stderr.decode(errors='replace')}")
+        entries = []
         skipped = 0
+        for record in listing.stdout.split(b"\0"):
+            if not record:
+                continue
+            meta, _, raw_path = record.partition(b"\t")
+            mode, kind, obj = meta.decode().split(" ")
+            path = raw_path.decode("utf-8", errors="surrogateescape")
+            if kind != "blob" or not _inside(dest, path):
+                skipped += 1  # submodules (commit), unsafe paths
+                continue
+            entries.append((mode, obj, path))
 
-        def safe(member: tarfile.TarInfo, path: str) -> tarfile.TarInfo | None:
-            nonlocal files, skipped
-            try:
-                member = tarfile.data_filter(member, path)
-            except tarfile.FilterError:
-                skipped += 1
-                return None
-            if member.isfile():
-                files += 1
-            return member
-
-        with obs.git_span("archive"):
+        files = 0
+        with obs.git_span("cat-file"):
             proc = subprocess.Popen(
-                ["git", "-C", str(self.path), "archive", "--format=tar", sha],
+                ["git", "-C", str(self.path), "cat-file", "--batch"],
+                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
-            assert proc.stdout is not None
-            with tarfile.open(fileobj=proc.stdout, mode="r|") as archive:
-                archive.extractall(dest, filter=safe)
+            assert proc.stdin is not None and proc.stdout is not None
+            proc.stdin.write("".join(f"{obj}\n" for _, obj, _ in entries).encode())
+            proc.stdin.close()
+            for mode, obj, path in entries:
+                header = proc.stdout.readline().split()
+                if len(header) != 3 or header[0].decode() != obj:
+                    raise GitError(f"git cat-file: unexpected answer for {obj}: {header!r}")
+                content = proc.stdout.read(int(header[2]))
+                proc.stdout.read(1)  # the newline after each object
+                target = dest / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if mode == "120000":
+                    link = content.decode("utf-8", errors="surrogateescape")
+                    if Path(link).is_absolute() or not _inside(dest, str(Path(path).parent / link)):
+                        skipped += 1
+                        continue
+                    target.symlink_to(link)
+                    continue
+                target.write_bytes(content)
+                if mode == "100755":
+                    target.chmod(0o755)
+                files += 1
             _, stderr = proc.communicate()
         if proc.returncode != 0:
-            raise GitError(f"git archive {sha} failed: {stderr.decode(errors='replace').strip()}")
+            raise GitError(f"git cat-file failed: {stderr.decode(errors='replace').strip()}")
         return ExtractedTree(dest, files, skipped)
+
+
+def _inside(root: Path, relative: str) -> bool:
+    """Whether `relative`, resolved lexically under `root`, stays inside it."""
+    import os
+
+    joined = os.path.normpath(os.path.join(root, relative))
+    return joined == str(root) or joined.startswith(str(root) + os.sep)

@@ -10,7 +10,7 @@ import psycopg
 import pytest
 
 from code_vitals.build_info import BuildInfo
-from code_vitals.collect import MeasureDefinitionConflict, collect
+from code_vitals.collect import MeasureDefinitionConflict, collect, lock_key
 from code_vitals.db.migrate import migrate
 from code_vitals.measures import CommitContext, Kind, Value
 from code_vitals.measures.files import Files
@@ -132,7 +132,7 @@ def test_a_run_row_records_the_build_outcome_and_trace(
         " commits_measured, finished_at IS NOT NULL, trace_id FROM run",
     )
     assert run[:7] == (result.run_id, "push", "0.4.99", "abc123", "success", 3, True)
-    assert isinstance(run[7], str) and len(run[7]) == 32  # all zeros with telemetry off
+    assert run[7] is None  # no trace to name with telemetry off
 
 
 def test_a_measure_with_no_value_is_still_done(db: tuple[str, str], repo: FixtureRepo) -> None:
@@ -145,28 +145,81 @@ def test_a_measure_with_no_value_is_still_done(db: tuple[str, str], repo: Fixtur
     assert _rows(owner, "SELECT count(*) FROM measurement") == [(0,)]
 
 
-def test_a_run_killed_part_way_is_finished_by_the_next(
+def test_a_failing_commit_is_retried_and_does_not_block_later_ones(
     db: tuple[str, str], repo: FixtureRepo
 ) -> None:
     owner, writer = db
-    with pytest.raises(RuntimeError, match="boom"):
-        collect(
-            writer, FIXTURE, repo.path, Trigger.BACKFILL, BUILD, measures=[FailsAt(repo.shas[2])]
-        )
-    assert _rows(owner, "SELECT count(*) FROM commit_measure") == [(2,)]
+    result = collect(
+        writer, FIXTURE, repo.path, Trigger.BACKFILL, BUILD, measures=[FailsAt(repo.shas[1])]
+    )
+    assert (result.outcome, result.commits_measured, result.commits_failed) == (
+        Outcome.FAILURE,
+        2,
+        1,
+    )
+    measured = _rows(
+        owner,
+        "SELECT c.sha FROM commit_measure cm JOIN commit c ON c.id = cm.commit_id"
+        " ORDER BY c.committed_at",
+    )
+    assert [m[0] for m in measured] == [repo.shas[0], repo.shas[2]]  # the later one too
     assert _rows(owner, "SELECT outcome::text, commits_measured FROM run") == [("failure", 2)]
+    assert _rows(owner, "SELECT last_run_outcome::text FROM freshness") == [("failure",)]
 
-    result = collect(writer, FIXTURE, repo.path, Trigger.BACKFILL, BUILD)
+    again = collect(writer, FIXTURE, repo.path, Trigger.BACKFILL, BUILD)
 
-    assert (result.backlog, result.commits_measured) == (1, 1)
+    assert (again.outcome, again.backlog, again.commits_measured) == (Outcome.SUCCESS, 1, 1)
     assert _rows(owner, "SELECT count(*) FROM measurement") == [(3,)]
+
+
+def test_a_failure_before_the_lock_is_recorded(db: tuple[str, str], tmp_path: Path) -> None:
+    owner, writer = db
+    with pytest.raises(Exception, match="no trunk"):
+        collect(writer, FIXTURE, tmp_path, Trigger.PUSH, BUILD)  # not a clone
+    assert _rows(owner, "SELECT outcome::text, finished_at IS NOT NULL FROM run") == [
+        ("failure", True)
+    ]
+
+
+def test_tags_added_or_removed_after_measuring_are_recorded(
+    db: tuple[str, str], repo: FixtureRepo
+) -> None:
+    owner, writer = db
+    collect(writer, FIXTURE, repo.path, Trigger.PUSH, BUILD)
+    # The release flow tags a commit only after deploying it, i.e. after the
+    # push-time run measured it.
+    repo.git("tag", "-a", "0.3.4", "-m", "deployed", repo.shas[2])
+    repo.git("tag", "-d", "0.2.9")
+
+    again = collect(writer, FIXTURE, repo.path, Trigger.PUSH, BUILD)
+
+    assert again.commits_measured == 0
+    assert _rows(owner, "SELECT sha, tags FROM commit WHERE tags <> '{}'") == [
+        (repo.shas[2], ["0.3.4"])
+    ]
+
+
+def _wait_until_lock_held(owner: str) -> None:
+    """Block until some session holds the fixture repo's advisory lock."""
+    deadline = time.monotonic() + 10
+    with psycopg.connect(owner) as conn:
+        while time.monotonic() < deadline:
+            held = conn.execute(
+                "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted"
+                " AND objid = (hashtext(%s)::bigint & x'FFFFFFFF'::bigint)::oid",
+                (lock_key("fixture"),),
+            ).fetchone()
+            if held and held[0]:
+                return
+            time.sleep(0.02)
+    raise AssertionError("the slow run never took the repo lock")
 
 
 class Slow(Files):
     """`files`, slowly: keeps the run (and its repo lock) busy."""
 
     def compute(self, context: CommitContext) -> Sequence[Value]:
-        time.sleep(0.4)
+        time.sleep(0.3)
         return super().compute(context)
 
 
@@ -182,7 +235,7 @@ def test_an_overlapping_run_waits_for_the_lock_then_finds_nothing(
 
     slow = threading.Thread(target=run, args=("slow", Slow()))
     slow.start()
-    time.sleep(0.3)  # the slow run holds the lock by now (3 commits x 0.4 s)
+    _wait_until_lock_held(owner)
     second = threading.Thread(target=run, args=("second", Files()))
     second.start()
     slow.join(30)

@@ -13,14 +13,15 @@ skill; Python binding: its references/python.md.
 - Identity: service.name, service.instance.id (the measured repo unless the
   variables carry one), deployment.environment.name (required),
   telemetry_source=otlp, and service.version from the build — not overridable.
-- Shutdown flushes all three signals in a daemon thread joined within a fixed
-  budget, so an unreachable or black-holed collector can never hold the
+- Shutdown flushes the three signals in parallel daemon threads joined within
+  one fixed budget, so an unreachable or black-holed collector can never hold the
   process (a CI step) open.
 """
 
 import contextlib
 import logging
 import threading
+import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 
@@ -188,16 +189,23 @@ class Telemetry:
         if not self._shutdowns:
             return True
 
-        def stop_all() -> None:
-            for stop in self._shutdowns:
-                # An export failure must never fail the run.
-                with contextlib.suppress(Exception):
-                    stop()
+        def stop(shutdown: Callable[[], object]) -> None:
+            # An export failure must never fail the run.
+            with contextlib.suppress(Exception):
+                shutdown()
 
-        worker = threading.Thread(target=stop_all, name="telemetry-shutdown", daemon=True)
-        worker.start()
-        worker.join(budget_seconds)
-        return not worker.is_alive()
+        # One thread per signal, all against one deadline: a stalled trace
+        # export cannot use up the budget the metrics and logs need.
+        workers = [
+            threading.Thread(target=stop, args=(s,), name="telemetry-shutdown", daemon=True)
+            for s in self._shutdowns
+        ]
+        for worker in workers:
+            worker.start()
+        deadline = time.monotonic() + budget_seconds
+        for worker in workers:
+            worker.join(max(0.0, deadline - time.monotonic()))
+        return not any(worker.is_alive() for worker in workers)
 
 
 def setup(environ: Mapping[str, str], build: BuildInfo, instance_id: str) -> Telemetry:

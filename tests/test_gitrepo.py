@@ -84,3 +84,20 @@ def test_extract_tree_never_writes_to_the_clone(tmp_path: Path) -> None:
     dest.mkdir()
     Clone(repo.path).extract_tree(repo.shas[1], dest)
     assert sorted(p.name for p in (repo.path / ".git").iterdir()) == before
+
+
+def test_extract_tree_ignores_export_attributes(tmp_path: Path) -> None:
+    # git archive would drop export-ignore files; measured values must not
+    # depend on a repo's export settings.
+    repo = make_repo(tmp_path)
+    sha = repo.commit(
+        "attrs",
+        {".gitattributes": "hidden.txt export-ignore\n", "hidden.txt": "h", "shown.txt": "s"},
+    )
+    dest = tmp_path / "out"
+    dest.mkdir()
+
+    tree = Clone(repo.path).extract_tree(sha, dest)
+
+    assert tree.files == 3
+    assert (dest / "hidden.txt").read_text() == "h"

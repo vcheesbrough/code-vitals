@@ -94,7 +94,7 @@ def test_all_three_signals_arrive_with_identity_and_correlation(
     assert attrs(root.attributes)["code_vitals.ci.pipeline.number"] == "42"
     assert attrs(root.attributes)["code_vitals.commits.measured"] == 3
     assert names.count("commit") == 3 and names.count("measure") == 3
-    assert "git archive" in names and "INSERT record commit" in names
+    assert "git cat-file" in names and "INSERT record commit" in names
     db = next(s for s in spans if s.name == "INSERT record commit")
     db_attributes = attrs(db.attributes)
     assert db_attributes["db.system.name"] == "postgresql"
@@ -176,3 +176,11 @@ def test_a_half_configured_set_fails_startup(writer: str, repo: FixtureRepo) -> 
     assert "telemetry misconfigured" in result.stderr
     with psycopg.connect(writer) as conn:
         assert conn.execute("SELECT count(*) FROM run").fetchone() == (0,)
+
+
+def test_failures_reach_the_ci_log_with_their_traceback(writer: str, tmp_path: Path) -> None:
+    not_a_clone = FixtureRepo(tmp_path)  # an empty directory
+    result, _ = run_collect(writer, not_a_clone, {})
+    assert result.returncode == 1
+    assert "code-vitals: ERROR code_vitals.collect: collect failed for fixture" in result.stderr
+    assert "Traceback" in result.stderr

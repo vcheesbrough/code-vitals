@@ -137,8 +137,11 @@ core, not saved for the `1.0.0` card, which is only the sign-off.
 - **The collector is a scheduled job:** each run is an entry point with its own
   root span. It force-flushes all signals on exit within a bounded timeout
   (~5 s), so telemetry can never noticeably slow a build.
-- **Logs go to stdout as well as OTLP**, because the Woodpecker step log is
-  where a human looks first.
+- **Logs: OTLP is the record; the CI step log gets plain text.** Structured
+  log records go over OTLP (trace-correlated in Loki). stdout carries a few
+  human lines (run start, summary) and stderr every WARNING/ERROR with its
+  traceback, because the Woodpecker step log is where a human looks first —
+  with or without telemetry.
 - **Not opted into dashboards or alerts** (skill §8). Freshness — each repo's
   last recorded commit and its age — is a SQL view and a Superset tile over the
   data itself, not telemetry, because it also catches a collector that never

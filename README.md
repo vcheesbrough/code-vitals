@@ -17,7 +17,8 @@ Needs [uv](https://docs.astral.sh/uv/) and Docker.
 
 ```sh
 uv sync
-uv run ruff format --check && uv run ruff check && uv run mypy && uv run pytest
+uv run ruff format --check && uv run ruff check && uv run mypy
+./scripts/with-test-postgres.sh uv run pytest   # database tests skip without it
 for t in scripts/test-*.sh; do sh "$t"; done
 uv run code-vitals --version
 ```
@@ -52,6 +53,30 @@ Ported from bored (its `.woodpecker/build.yml`, card #461):
 - **Deployments** promote an already-published image and never rebuild; the git
   tag (same string as the version) is pushed only after a successful
   deployment.
+
+## Database
+
+`code-vitals migrate` applies the schema (`src/code_vitals/db/migrations/`,
+plain SQL, numbered) and then the role grants (`src/code_vitals/db/roles.sql`)
+to the database named by `CODE_VITALS_DATABASE_URL`, as its owner. With
+`CODE_VITALS_WRITER_PASSWORD` / `CODE_VITALS_READER_PASSWORD` set, those roles
+get their login.
+
+| Role | May |
+| --- | --- |
+| `code_vitals` (owner) | everything; used only by `migrate` |
+| `code_vitals_writer` (the collector) | read, insert and update the tables; never alter, drop, delete or create |
+| `code_vitals_reader` (Superset) | `SELECT` on `current_measurement`, `current_function_complexity` and `freshness` only |
+
+The `current_*` views show only measure versions and area rulesets whose
+backfill is `complete`, so a chart never mixes two definitions of a measure.
+
+## Deploying
+
+A Woodpecker *Deploy* of a commit, with target `dev` (any branch) or `prod`
+(`main` only), promotes the image its push already published and never
+rebuilds. Each dev deploy starts from a fresh copy of prod. See AGENTS.md
+§ Environments and promotion.
 
 ## License
 

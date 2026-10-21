@@ -2,7 +2,7 @@
 name = "code-vitals"
 # MAJOR.MINOR is the iteration (AGENTS.md); the patch is a placeholder. CI
 # replaces it with the push pipeline's number (scripts/compute-release-tag.sh).
-version = "0.1.0"
+version = "0.2.0"
 description = "Measures of a project's code recorded at every trunk commit."
 readme = "README.md"
 license = "PolyForm-Noncommercial-1.0.0"
@@ -12,6 +12,7 @@ dependencies = [
     # Pinned exactly: a lizard upgrade changes measured values, so it is a
     # measure version bump (AGENTS.md review criteria), never a silent update.
     "lizard==1.24.1",
+    "psycopg[binary]==3.3.6",
 ]
 
 [project.scripts]
@@ -21,7 +22,9 @@ code-vitals = "code_vitals.cli:main"
 dev = [
     "mypy==2.4.0",
     "pytest==9.1.1",
+    "pyyaml==6.0.3",
     "ruff==0.17.1",
+    "types-pyyaml==6.0.12.20260906",
 ]
 
 [build-system]

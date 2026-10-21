@@ -1,0 +1,32 @@
+# code-vitals' own stack, one compose project per environment
+# (`code-vitals` for prod, `code-vitals-dev` for dev; scripts/deploy-stack.sh).
+#
+# Postgres publishes no port: everything that talks to it — migrations, the
+# collector — runs as a container on this project's network
+# (`<project>_default`) through the CI agent's docker socket, so nothing reaches
+# it over the LAN.
+name: code-vitals
+
+services:
+  postgres:
+    # Same image and digest as bored and v-note.
+    image: postgres:16-alpine@sha256:16bc17c64a573ef34162af9298258d1aec548232985b33ed7b1eac33ba35c229
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: code_vitals
+      POSTGRES_DB: code_vitals
+      # Read by the image only when it initialises an empty data directory;
+      # rotating it later is an ALTER ROLE, not a change here.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U code_vitals -d code_vitals"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+
+volumes:
+  pg:
+    external: true
+    name: ${PG_VOLUME:?PG_VOLUME is required}

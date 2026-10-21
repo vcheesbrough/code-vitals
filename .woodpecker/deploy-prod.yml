@@ -1,0 +1,104 @@
+# Deploy-prod: a manual Woodpecker deployment targeting `prod`, from `main`
+# ONLY — gated in `when:` below, so a deployment from another branch never
+# starts (tests/test_pipelines.py pins it). That gate stops ACCIDENTS, not a
+# deliberate change: Woodpecker runs the pipeline files of the commit it
+# deploys, so a branch can edit this gate, and the broker hands the prod
+# secrets to any pipeline of this repo. The trust boundary is who may push and
+# start deployments (AGENTS.md § Deviations register). It promotes the image
+# the push pipeline already built, tested and published for this commit and
+# never rebuilds (bored card #254).
+#
+#   find-commit-tag → verify-image → deploy → tag-release
+#
+# deploy-dev.yml is the same flow for dev, from any branch;
+# tests/test_pipelines.py pins both gates. The steps are kept identical apart
+# from the environment, so diff the two files when changing either.
+when:
+  - event: deployment
+    branch: main
+    evaluate: 'CI_PIPELINE_DEPLOY_TARGET == "prod"'
+
+steps:
+  find-commit-tag:
+    # The semver git tag already on this commit, if it was deployed before
+    # (scripts/find-commit-tag.sh); verify-image then redeploys exactly that
+    # build. Read-only.
+    depends_on: []
+    image: alpine/git:v2.49.1@sha256:c0280cf9572316299b08544065d3bf35db65043d5e3963982ec50647d2746e26
+    environment:
+      GITHUB_TOKEN:
+        from_secret: github_token
+    commands:
+      - ./scripts/find-commit-tag.sh
+
+  verify-image:
+    # resolve-deploy-tag.sh picks the build: the commit's existing tag, else its
+    # latest green build (:commit-<sha>). publish-image only pushes after the
+    # in-build tests pass, so the image existing in the registry IS the tested
+    # signal. Pull it, re-assert its labels (the revision label catches an
+    # image of another commit), and record its digest for the deploy: from
+    # here on the image is referenced by digest, never by a tag.
+    depends_on:
+      - find-commit-tag
+    image: &docker-image docker:27-cli@sha256:851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c
+    volumes: &docker-socket
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment: &registry-creds
+      REGISTRY_USER:
+        from_secret: zot_ci_user
+      REGISTRY_PASSWORD:
+        from_secret: zot_ci_password
+    commands:
+      - &docker-login echo "$$REGISTRY_PASSWORD" | docker login registry.desync.link -u "$$REGISTRY_USER" --password-stdin
+      - ./scripts/resolve-deploy-tag.sh
+      - |
+        RELEASE_TAG=$$(cat .release-tag)
+        IMAGE=registry.desync.link/code-vitals-collector:$$RELEASE_TAG
+        if ! docker pull "$$IMAGE"; then
+          echo "ERROR: $$IMAGE not found in registry." >&2
+          echo "resolve-deploy-tag.sh chose $$RELEASE_TAG (see its output above). If that is this commit's existing git tag, the build it names has since left the registry:" >&2
+          echo "restore the image, or delete the git tag $$RELEASE_TAG so the deploy takes the commit's latest green build." >&2
+          exit 1
+        fi
+        ./scripts/check-image-metadata.sh "$$IMAGE" "$$RELEASE_TAG" "$$CI_COMMIT_SHA"
+        docker image inspect -f '{{ index .RepoDigests 0 }}' "$$IMAGE" > .deploy-image
+        echo "deploying $$(cat .deploy-image)"
+
+  deploy:
+    # Postgres up, then the deployed image's `migrate` (scripts/deploy-stack.sh;
+    # prod is never reset or restored). Secrets come from
+    # the broker's per-repo layer with from_secret — see AGENTS.md § Deviations
+    # register for why this is not bored's `sovereign-config render`.
+    depends_on:
+      - verify-image
+    image: *docker-image
+    volumes: *docker-socket
+    environment:
+      <<: *registry-creds
+      POSTGRES_PASSWORD:
+        from_secret: code_vitals_prod_postgres_password
+      CODE_VITALS_WRITER_PASSWORD:
+        from_secret: code_vitals_prod_writer_password
+      CODE_VITALS_READER_PASSWORD:
+        from_secret: code_vitals_prod_reader_password
+    commands:
+      - *docker-login
+      - ./scripts/deploy-stack.sh prod "$$(cat .deploy-image)"
+
+  tag-release:
+    # After a successful deploy, push the git tag matching .release-tag, so a
+    # tag means "this version was deployed". push-tag is idempotent: a commit
+    # already carrying this tag (a redeploy, or dev then prod) exits 0, and a
+    # commit never gets a second tag. push-tag never reads the manifest, but
+    # the plugin requires major_minor_source and knows only go and cargo;
+    # `cargo` is a placeholder until shared release tooling replaces this
+    # (card #503).
+    depends_on:
+      - deploy
+    pull: true
+    image: ghcr.io/vcheesbrough/woodpecker-plugin-release-versions:0.1.1@sha256:cf74d9706cb42b6d27c8d185789cd814ed061c8c88e06452d33ce3aed0bf9a22
+    settings:
+      mode: push-tag
+      major_minor_source: cargo
+      github_token:
+        from_secret: github_token

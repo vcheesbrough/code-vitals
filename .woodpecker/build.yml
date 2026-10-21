@@ -58,8 +58,11 @@ steps:
         RELEASE_TAG=$$(cat .release-tag)
         CREATED=$$(date -u +%Y-%m-%dT%H:%M:%SZ)
         IMAGE=registry.desync.link/code-vitals-collector:$$RELEASE_TAG
-        docker build \
+        # The in-build tests need Postgres: with-test-postgres.sh starts a
+        # throwaway one beside the build and hands its URL in as a build secret.
+        ./scripts/with-test-postgres.sh docker build \
           --progress=plain \
+          --secret id=database_url,env=CODE_VITALS_TEST_DATABASE_URL \
           --build-arg TOKEI_VERSION="$$TOKEI_VERSION" \
           --build-arg RELEASE_TAG="$$RELEASE_TAG" \
           --build-arg GIT_REVISION="$$CI_COMMIT_SHA" \

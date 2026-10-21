@@ -149,3 +149,15 @@ def test_tool_based_definitions_name_the_pinned_tool_versions() -> None:
         if measure.name in {"nloc", "functions", "complexity_total", "functions_over_10",
                             "max_function_complexity", "function_complexity"}:  # fmt: skip
             assert f"lizard {analysis.LIZARD_VERSION}" in measure.definition
+
+
+def test_embedded_code_counts_in_its_host_files_language(tmp_path: Path) -> None:
+    (tmp_path / "doc.md").write_text("# Doc\n\nText.\n\n```rust\nfn a() {}\nfn b() {}\n```\n")
+    (tmp_path / "page.html").write_text(
+        "<html>\n<body>\n<script>\nvar a = 1;\nvar b = 2;\n</script>\n</body>\n</html>\n"
+    )
+    context = CommitContext("fixture", "0" * 40, tmp_path, 2, RULES)
+    assert _by(list(LinesOfCode().compute(context))) == {
+        ("tooling", "Markdown"): 2.0,  # the two Rust lines in its code block
+        ("tooling", "HTML"): 8.0,  # 6 of markup + 2 of embedded JavaScript
+    }

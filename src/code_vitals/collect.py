@@ -51,6 +51,7 @@ class AreaRulesetConflict(RuntimeError):
 
 @dataclass(frozen=True)
 class _Ruleset:
+    id: int
     rules: AreaRuleset
     area_ids: dict[str, int]
 
@@ -204,7 +205,7 @@ def _sync_ruleset(conn: Conn, repo_id: int, rules: AreaRuleset) -> _Ruleset:
                 "SELECT id, name FROM area WHERE ruleset_id = %s", (ruleset_id,)
             )
         }
-    return _Ruleset(rules, area_ids)
+    return _Ruleset(ruleset_id, rules, area_ids)
 
 
 def lock_key(repo: str) -> str:
@@ -249,8 +250,9 @@ def _catch_up(
             (str(sha), int(str(measure_id)))
             for sha, measure_id in conn.execute(
                 "SELECT c.sha, cm.measure_id FROM commit_measure cm"
-                " JOIN commit c ON c.id = cm.commit_id WHERE c.repo_id = %s",
-                (repo_id,),
+                " JOIN commit c ON c.id = cm.commit_id"
+                " WHERE c.repo_id = %s AND cm.ruleset_id = %s",
+                (repo_id, ruleset.id),
             )
         }
     work = []
@@ -379,9 +381,9 @@ def _measure_commit(
                     ],
                 )
                 cur.executemany(
-                    "INSERT INTO commit_measure (commit_id, measure_id) VALUES (%s, %s)"
-                    " ON CONFLICT DO NOTHING",
-                    [(commit_id, measure_ids[(m.name, m.version)]) for m in missing],
+                    "INSERT INTO commit_measure (commit_id, measure_id, ruleset_id)"
+                    " VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                    [(commit_id, measure_ids[(m.name, m.version)], ruleset.id) for m in missing],
                 )
 
 

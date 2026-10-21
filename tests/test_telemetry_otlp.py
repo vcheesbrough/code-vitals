@@ -102,6 +102,11 @@ def test_all_three_signals_arrive_with_identity_and_correlation(
     assert db_attributes["db.system.name"] == "postgresql"
     assert "INSERT INTO" not in str(db_attributes)  # no SQL text on spans
     assert {s.trace_id for s in spans} == {root.trace_id}
+    by_id = {s.span_id: s for s in spans}
+    for tool in ("tokei", "lizard"):
+        tool_spans = [s for s in spans if s.name == tool]
+        assert len(tool_spans) == 3  # once per commit, however many measures use it
+        assert all(by_id[s.parent_span_id].name == "measure" for s in tool_spans)
 
     # Logs carry the trace and span they were written in.
     records = [record for _, record in got.log_records()]

@@ -68,3 +68,9 @@ def test_rules_round_trip_as_json() -> None:
     rules = REPOS["bored"].areas.as_json()
     assert rules["rules"][-1] == ["**", "tooling"]
     assert "**/*.lock" in rules["exclude"]
+
+
+def test_only_gradle_build_output_is_excluded_as_build() -> None:
+    sovereign = REPOS["sovereign-config"].areas
+    assert sovereign.area_of("crates/sovereign-config-server/build/web_bundle.rs") == "server"
+    assert REPOS["v-note"].areas.area_of("android/app/build/outputs/x.apk") is None

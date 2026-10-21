@@ -81,15 +81,27 @@ def run_tokei(tree: Path) -> list[TokeiFile]:
     for language, stats in json.loads(result.stdout).items():
         if language == "Total":
             continue
+        # Code embedded in a file of this language (a ```rust block in
+        # Markdown, <script> in HTML) is reported under `children`, by the
+        # host file's name; add it back to that file, in the host's language.
+        embedded: dict[str, list[int]] = {}
+        for child_reports in stats.get("children", {}).values():
+            for report in child_reports:
+                s = report["stats"]
+                totals = embedded.setdefault(report["name"], [0, 0, 0])
+                totals[0] += int(s["code"])
+                totals[1] += int(s["comments"])
+                totals[2] += int(s["blanks"])
         for report in stats.get("reports", []):
             s = report["stats"]
+            extra = embedded.get(report["name"], [0, 0, 0])
             files.append(
                 TokeiFile(
                     path=Path(report["name"]).relative_to(tree).as_posix(),
                     language=language,
-                    code=int(s["code"]),
-                    comments=int(s["comments"]),
-                    blanks=int(s["blanks"]),
+                    code=int(s["code"]) + extra[0],
+                    comments=int(s["comments"]) + extra[1],
+                    blanks=int(s["blanks"]) + extra[2],
                 )
             )
     return sorted(files, key=lambda f: f.path)

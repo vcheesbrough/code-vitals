@@ -13,7 +13,8 @@ from code_vitals.areas import AreaRuleset, ruleset
 from code_vitals.build_info import BuildInfo
 from code_vitals.collect import AreaRulesetConflict, MeasureDefinitionConflict, collect, lock_key
 from code_vitals.db.migrate import migrate
-from code_vitals.measures import CommitContext, Kind, Value, registered
+from code_vitals.measures import CommitContext, Kind, Measure, Value, registered
+from code_vitals.measures.complexity import FunctionHotspots, Functions
 from code_vitals.measures.files import Files
 from code_vitals.obs import Outcome, Trigger
 from code_vitals.repos import RepoConfig, VersionFile, VersionSource
@@ -351,3 +352,88 @@ def test_a_changed_definition_text_without_a_version_bump_is_refused(
 
     with pytest.raises(MeasureDefinitionConflict, match="needs a"):
         collect(writer, FIXTURE, repo.path, Trigger.PUSH, BUILD, measures=[Reworded()])
+
+
+def _config(rules: AreaRuleset) -> RepoConfig:
+    return RepoConfig(
+        "fixture", "main", (VersionSource("pyproject.toml", VersionFile.PYPROJECT),), rules
+    )
+
+
+def _app_repo(tmp_path: Path) -> FixtureRepo:
+    repo = make_repo(tmp_path)
+    repo.shas.append(
+        repo.commit("one", {"a/x.py": "def f(x):\n    return x\n", "b/y.py": "y = 1\n"})
+    )
+    repo.shas.append(repo.commit("two", {"b/z.py": "def g():\n    return 1\n"}))
+    return repo
+
+
+def test_a_ruleset_bump_re_measures_the_repo_into_the_new_areas(
+    db: tuple[str, str], tmp_path: Path
+) -> None:
+    owner, writer = db
+    repo = _app_repo(tmp_path)
+    measures: list[Measure] = [Files(), Functions()]
+    v1 = AreaRuleset(1, (), (("a/**", "a"), ("**", "tooling")))
+    v2 = AreaRuleset(2, (), (("a/**", "a"), ("b/**", "b"), ("**", "tooling")))
+    collect(writer, _config(v1), repo.path, Trigger.BACKFILL, BUILD, measures=measures)
+
+    again = collect(writer, _config(v2), repo.path, Trigger.BACKFILL, BUILD, measures=measures)
+
+    assert (again.backlog, again.commits_measured) == (2, 2)
+    by_ruleset = _rows(
+        owner,
+        "SELECT r.version, a.name, sum(x.value) FROM measurement x"
+        " JOIN measure m ON m.id = x.measure_id AND m.name = 'functions'"
+        " JOIN area a ON a.id = x.area_id JOIN area_ruleset r ON r.id = a.ruleset_id"
+        " GROUP BY 1, 2 ORDER BY 1, 2",
+    )
+    assert by_ruleset == [(1, "a", 2.0), (1, "tooling", 1.0), (2, "a", 2.0), (2, "b", 1.0)]
+    # The unsplit `files` values were not duplicated by the re-measure.
+    assert _rows(
+        owner,
+        "SELECT count(*) FROM measurement x JOIN measure m ON m.id = x.measure_id"
+        " WHERE m.name = 'files'",
+    ) == [(2,)]
+
+
+class UnknownArea(Files):
+    name = "unknown_area"
+    definition = "Puts a value in an area the ruleset does not have."
+
+    def compute(self, context: CommitContext) -> Sequence[Value]:
+        return [Value(1.0, area="nowhere")]
+
+
+def test_a_value_in_an_unknown_area_fails_that_commit(
+    db: tuple[str, str], repo: FixtureRepo
+) -> None:
+    _, writer = db
+    result = collect(writer, FIXTURE, repo.path, Trigger.PUSH, BUILD, measures=[UnknownArea()])
+    assert (result.outcome, result.commits_failed) == (Outcome.FAILURE, 3)
+
+
+def test_the_hotspot_view_shows_areas_of_the_current_ruleset_only(
+    db: tuple[str, str], tmp_path: Path
+) -> None:
+    owner, writer = db
+    repo = _app_repo(tmp_path)
+    v1 = AreaRuleset(1, (), (("a/**", "a"), ("**", "tooling")))
+    collect(writer, _config(v1), repo.path, Trigger.BACKFILL, BUILD, measures=[FunctionHotspots()])
+    with psycopg.connect(owner) as conn:
+        conn.execute("UPDATE measure SET status = 'complete'")
+        conn.execute("UPDATE area_ruleset SET status = 'complete'")
+    hotspots = _rows(
+        owner,
+        "SELECT area, file, function, ccn FROM current_function_complexity ORDER BY sha, file",
+    )
+    assert ("a", "a/x.py", "f", 1) in hotspots
+    assert {row[0] for row in hotspots} == {"a", "tooling"}
+
+    with psycopg.connect(owner) as conn:  # a newer ruleset completes: v1's rows drop out
+        conn.execute(
+            "INSERT INTO area_ruleset (repo_id, version, rules, status)"
+            " SELECT repo_id, 2, '{}', 'complete' FROM area_ruleset"
+        )
+    assert _rows(owner, "SELECT count(*) FROM current_function_complexity") == [(0,)]

@@ -52,7 +52,7 @@ SHARED_EXCLUDE = (
     "**/target/**",
     "**/node_modules/**",
     "**/dist/**",
-    "**/build/**",
+    "android/**/build/**",  # Gradle output; not every build/ dir is generated
     "**/.gradle/**",
     "web-dist/**",  # sovereign-config's committed web bundle (2026-07 to 2026-10)
     "**/*.lock",

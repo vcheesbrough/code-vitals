@@ -49,7 +49,10 @@ def _seed(url: str) -> None:
             " (2, 1, NULL, '', 5)"  # unsplit row
         )
         # The collector's done-markers (freshness reads them).
-        conn.execute("INSERT INTO commit_measure (commit_id, measure_id) VALUES (1, 1), (2, 1)")
+        conn.execute(
+            "INSERT INTO commit_measure (commit_id, measure_id, ruleset_id)"
+            " VALUES (1, 1, 1), (2, 1, 1)"
+        )
 
 
 def test_current_measurement_shows_only_complete_versions_and_current_areas(db: str) -> None:

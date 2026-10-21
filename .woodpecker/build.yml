@@ -72,6 +72,24 @@ steps:
           -t "$$IMAGE" .
         ./scripts/check-image-metadata.sh "$$IMAGE" "$$RELEASE_TAG" "$$CI_COMMIT_SHA"
         ./scripts/check-image-tools.sh "$$IMAGE" "$$RELEASE_TAG" "$$CI_COMMIT_SHA"
+      # The Superset image (card #499): Superset plus its Postgres driver,
+      # authlib and our config, under the same version. Its config must load
+      # with the variables a deployment sets, and fail without them.
+      - |
+        RELEASE_TAG=$$(cat .release-tag)
+        CREATED=$$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        SUPERSET=registry.desync.link/code-vitals-superset:$$RELEASE_TAG
+        docker build \
+          --progress=plain \
+          -f superset/Dockerfile \
+          --build-arg RELEASE_TAG="$$RELEASE_TAG" \
+          --build-arg GIT_REVISION="$$CI_COMMIT_SHA" \
+          --label org.opencontainers.image.version="$$RELEASE_TAG" \
+          --label org.opencontainers.image.revision="$$CI_COMMIT_SHA" \
+          --label org.opencontainers.image.created="$$CREATED" \
+          -t "$$SUPERSET" .
+        ./scripts/check-image-metadata.sh "$$SUPERSET" "$$RELEASE_TAG" "$$CI_COMMIT_SHA"
+        ./scripts/check-superset-image.sh "$$SUPERSET"
 
   publish-image:
     # Push the built + checked image only after build is green, so the registry
@@ -90,4 +108,8 @@ steps:
       # Refuses to overwrite an existing version (pipeline numbers repeat if
       # the repo is re-created in Woodpecker), then pushes :<version> and the
       # same image as :commit-<sha> for deployments to find.
+      # The Superset image first: the collector's :commit-<sha> is what a
+      # deployment resolves the build through, so it must appear last, once
+      # both images of the build are in the registry.
+      - IMAGE_REPO=registry.desync.link/code-vitals-superset ./scripts/publish-release-image.sh "$$(cat .release-tag)" "$$CI_COMMIT_SHA"
       - ./scripts/publish-release-image.sh "$$(cat .release-tag)" "$$CI_COMMIT_SHA"

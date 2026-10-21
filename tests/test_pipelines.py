@@ -66,6 +66,45 @@ def test_dev_deploys_dev_and_prod_deploys_prod() -> None:
         assert not any(s.startswith(f"code_vitals_{other}_") for s in secrets)
 
 
+def test_dev_applies_only_the_dev_blueprint_with_only_dev_secrets() -> None:
+    settings = _workflow("deploy-dev.yml")["steps"]["apply-authentik-blueprint"]["settings"]
+    assert settings["file"] == "authentik/blueprint-dev.yaml"
+    assert list(settings["vars"]) == ["AUTHENTIK_CODE_VITALS_DEV_CLIENT_SECRET"]
+    assert settings["vars"]["AUTHENTIK_CODE_VITALS_DEV_CLIENT_SECRET"]["from_secret"] == (
+        "code_vitals_dev_oidc_client_secret"
+    )
+
+
+def test_prod_applies_the_full_blueprint() -> None:
+    settings = _workflow("deploy-prod.yml")["steps"]["apply-authentik-blueprint"]["settings"]
+    assert settings["file"] == "authentik/blueprint.yaml"
+    assert set(settings["vars"]) == {
+        "AUTHENTIK_CODE_VITALS_DEV_CLIENT_SECRET",
+        "AUTHENTIK_CODE_VITALS_PROD_CLIENT_SECRET",
+    }
+
+
+@pytest.mark.parametrize("env", ["dev", "prod"])
+def test_a_failed_smoke_check_leaves_the_commit_untagged(env: str) -> None:
+    steps = _workflow(f"deploy-{env}.yml")["steps"]
+    assert "smoke-superset.sh " + env in "\n".join(steps["smoke"]["commands"])
+    assert steps["smoke"]["depends_on"] == ["deploy"]
+    assert steps["tag-release"]["depends_on"] == ["smoke"]
+
+
+def test_the_superset_image_is_published_before_the_collector() -> None:
+    # A deployment resolves its build through the collector's :commit-<sha>,
+    # so that tag must only exist once the Superset image is published too.
+    commands = _workflow("build.yml")["steps"]["publish-image"]["commands"]
+    superset = next(i for i, c in enumerate(commands) if "code-vitals-superset" in c)
+    collector = next(
+        i
+        for i, c in enumerate(commands)
+        if "publish-release-image.sh" in c and "IMAGE_REPO" not in c
+    )
+    assert superset < collector
+
+
 def test_a_push_never_deploys() -> None:
     for clause in _when(_workflow("build.yml")):
         events = clause["event"]

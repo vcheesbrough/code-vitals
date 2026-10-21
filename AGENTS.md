@@ -85,6 +85,9 @@ Two environments on mini, each its own compose project of `deploy/compose.yaml`:
 | --- | --- | --- |
 | Compose project / Postgres container | `code-vitals-dev` / `code-vitals-dev-postgres-1` | `code-vitals` / `code-vitals-postgres-1` |
 | Data volume | `code-vitals-dev-pg` | `code-vitals-prod-pg` |
+| Superset | https://code-vitals-dev.desync.link (`code-vitals-dev-superset-1`) | https://code-vitals.desync.link (`code-vitals-superset-1`) |
+| Databases on that Postgres | `code_vitals` (reset from prod each deploy), `superset` (kept) | `code_vitals`, `superset` (both backed up nightly: mini-config #504) |
+| Authentik application / groups | `code-vitals-dev` / `code-vitals-dev-users`, `-admins` | `code-vitals` / `code-vitals-users`, `-admins` |
 | Deployed by | Woodpecker *Deploy*, target `dev`, **any branch** (`.woodpecker/deploy-dev.yml`) | target `prod`, **`main` only**, gated in `when:` (`.woodpecker/deploy-prod.yml`) |
 
 - **A push never deploys.** A deployment promotes the image the push already
@@ -95,8 +98,19 @@ Two environments on mini, each its own compose project of `deploy/compose.yaml`:
   then migrates it: the migration is tested on prod-shaped data and no row a
   previous dev deploy wrote survives. Dev is disposable; never keep anything
   there.
-- **Postgres publishes no port.** Migrations and the collector run as
-  containers on the project's network through the agent's docker socket.
+- **Postgres publishes no port.** Migrations, the collector and Superset run
+  as containers on the project's network through the agent's docker socket;
+  only Superset is also on Traefik's `proxy-backend`.
+- **Superset** (`superset/`) is its own image, `code-vitals-superset`, built
+  and published by the push pipeline beside the collector under the same
+  version. Sign-in is OIDC through Authentik (`authentik/` blueprints, applied
+  on deploy); group membership is managed by hand in Authentik. Each deploy
+  runs `superset db upgrade`, `init` and `set-database-uri` in a one-off
+  container (`superset/bootstrap.sh`), then smoke-checks health, the sign-in
+  redirect and the reader role (`scripts/smoke-superset.sh`) before tagging.
+- `DEPLOY_PULL=missing ./scripts/deploy-stack.sh <env> <collector> <superset>`
+  (with the six secrets and a `proxy-backend` network) runs a stack on a local
+  docker for trying changes; never point it at mini by hand.
 - `tests/test_pipelines.py` pins the gates: prod only from `main`, dev only to
   dev, a push never deploys, every step image pinned by digest. **The gates
   guard against accidents, not against a deliberate change** — see the trust
@@ -149,7 +163,8 @@ core, not saved for the `1.0.0` card, which is only the sign-off.
   deploy reads its compose layer through a read-only sovereign-config
   connection. That connection can only be created through the sovereign-config
   MCP, which returns its URL into the agent transcript (baseline §7), so the
-  deploy's secrets (`code_vitals_{dev,prod}_{postgres,writer,reader}_password`)
+  deploy's secrets (`code_vitals_{dev,prod}_{postgres,writer,reader}_password`,
+  `code_vitals_{dev,prod}_{superset_secret_key,superset_db_password,oidc_client_secret}`)
   live in the broker's per-repo layer
   `/woodpecker/repos/vcheesbrough/code-vitals/` and reach the steps through
   `from_secret`, as sovereign-config's own deploy does. They were generated with

@@ -2,29 +2,38 @@
 # Deploy code-vitals' stack for one environment on the CI agent's docker host.
 #
 #   1. Postgres up (deploy/compose.yaml), waiting until healthy.
-#   2. dev only: recreate the dev database and fill it from a fresh dump of
-#      prod, so dev starts from a copy of prod on every deploy — the migration
-#      is tested on prod-shaped data, and no row a previous dev deploy wrote
-#      survives (writes are idempotent, so stale rows would mask a fix). While
-#      prod is not running, dev starts empty.
-#   3. `code-vitals migrate` from the image being deployed, run on the
-#      project's network: migrations, then role grants, then the writer and
+#   2. dev only: recreate the dev `code_vitals` database and fill it from a
+#      fresh dump of prod, so dev starts from a copy of prod on every deploy —
+#      the migration is tested on prod-shaped data, and no row a previous dev
+#      deploy wrote survives (writes are idempotent, so stale rows would mask a
+#      fix). While prod is not running, dev starts empty. Superset's own
+#      `superset` database is not reset.
+#   3. `code-vitals migrate` from the collector image being deployed, run on
+#      the project's network: migrations, then role grants, then the writer and
 #      reader logins.
+#   4. Superset's metadata role and database (created if missing; password
+#      set on every deploy), its one-off bootstrap (superset/bootstrap.sh), then
+#      Superset itself, waiting until healthy.
 #
-# Usage: deploy-stack.sh <dev|prod> <collector-image-ref>
+# Usage: deploy-stack.sh <dev|prod> <collector-image-ref> <superset-image-ref>
+# DEPLOY_PULL (default `always`): compose's pull policy; `missing` lets a local
+# run use images that exist only on this machine.
 # Environment (from Woodpecker secrets; never printed):
-#   POSTGRES_PASSWORD, CODE_VITALS_WRITER_PASSWORD, CODE_VITALS_READER_PASSWORD
+#   POSTGRES_PASSWORD, CODE_VITALS_WRITER_PASSWORD, CODE_VITALS_READER_PASSWORD,
+#   SUPERSET_SECRET_KEY, SUPERSET_DB_PASSWORD, AUTHENTIK_CLIENT_SECRET
 # Run from the repository root.
 #
-# Nothing here reads input: Woodpecker hands the step's script to the shell on
-# stdin, and a docker command that read it would eat the rest of the step
-# (bored deploys 385, 390, 391). stdin is detached for everything below.
+# Nothing here reads input unless redirected: Woodpecker hands the step's
+# script to the shell on stdin, and a docker command that read it would eat the
+# rest of the step (bored deploys 385, 390, 391).
 
 set -eu
 exec < /dev/null
 
-env="${1:?usage: deploy-stack.sh <dev|prod> <collector-image-ref>}"
-image="${2:?usage: deploy-stack.sh <dev|prod> <collector-image-ref>}"
+usage="usage: deploy-stack.sh <dev|prod> <collector-image-ref> <superset-image-ref>"
+env="${1:?$usage}"
+image="${2:?$usage}"
+SUPERSET_IMAGE="${3:?$usage}"
 
 case "$env" in
   prod) project=code-vitals ;;
@@ -37,15 +46,22 @@ esac
 prod_container=code-vitals-postgres-1
 container="$project-postgres-1"
 PG_VOLUME="code-vitals-$env-pg"
-export PG_VOLUME
+CODE_VITALS_ENV="$env"
+SUPERSET_HOST="$project.desync.link"
+# Postgres's alias on the project network (deploy/compose.yaml): clients use it
+# rather than `postgres`, which another stack could also answer to on a shared
+# network.
+CODE_VITALS_DB_HOST="$project-db"
+export PG_VOLUME CODE_VITALS_ENV SUPERSET_HOST SUPERSET_IMAGE CODE_VITALS_DB_HOST
 
-for name in POSTGRES_PASSWORD CODE_VITALS_WRITER_PASSWORD CODE_VITALS_READER_PASSWORD; do
+for name in POSTGRES_PASSWORD CODE_VITALS_WRITER_PASSWORD CODE_VITALS_READER_PASSWORD \
+  SUPERSET_SECRET_KEY SUPERSET_DB_PASSWORD AUTHENTIK_CLIENT_SECRET; do
   value=$(printenv "$name" || true)
   if [ -z "$value" ]; then
     echo "ERROR: $name is required" >&2
     exit 1
   fi
-  # They go into a connection URL or a role's password; generate them as hex.
+  # Some go into a connection URL; all are generated as hex.
   case "$value" in
     *[!A-Za-z0-9._~-]*)
       echo "ERROR: $name may contain only A-Z a-z 0-9 . _ ~ - (it goes into a URL)" >&2
@@ -54,9 +70,15 @@ for name in POSTGRES_PASSWORD CODE_VITALS_WRITER_PASSWORD CODE_VITALS_READER_PAS
   esac
 done
 
+pull="${DEPLOY_PULL:-always}"
+
+compose() {
+  docker compose -p "$project" -f deploy/compose.yaml "$@"
+}
+
 echo "==> $env: postgres ($project, volume $PG_VOLUME)"
 docker volume create "$PG_VOLUME" > /dev/null
-docker compose -p "$project" -f deploy/compose.yaml up -d --pull always --wait --wait-timeout 120 postgres
+compose up -d --pull "$pull" --wait --wait-timeout 120 postgres
 
 if [ "$env" = dev ]; then
   echo "==> dev: recreating the database"
@@ -75,11 +97,39 @@ if [ "$env" = dev ]; then
 fi
 
 echo "==> $env: migrate"
-CODE_VITALS_DATABASE_URL="postgresql://code_vitals:$POSTGRES_PASSWORD@postgres:5432/code_vitals"
+CODE_VITALS_DATABASE_URL="postgresql://code_vitals:$POSTGRES_PASSWORD@$CODE_VITALS_DB_HOST:5432/code_vitals"
 export CODE_VITALS_DATABASE_URL
 # `-e NAME` copies each value from this environment, so no secret appears on a
 # command line (`ps` on the agent host) or in the step log.
 docker run --rm --network "${project}_default" \
   -e CODE_VITALS_DATABASE_URL -e CODE_VITALS_WRITER_PASSWORD -e CODE_VITALS_READER_PASSWORD \
   "$image" migrate
+
+echo "==> $env: superset metadata role and database"
+# Over the container's local socket, which the postgres image trusts. The
+# password reaches psql through `-e` and \getenv, so it is on no command line
+# and in no SQL text, and the session keeps the statement out of the server
+# log (as bored provisions its pgweb role).
+SUPERSET_NEW_PASSWORD="$SUPERSET_DB_PASSWORD"
+export SUPERSET_NEW_PASSWORD
+docker exec -i -e SUPERSET_NEW_PASSWORD "$container" \
+  psql -v ON_ERROR_STOP=1 -q -U code_vitals -d postgres <<'SQL'
+SET log_statement = 'none';
+SET log_min_error_statement = 'panic';
+SET log_min_duration_statement = -1;
+\getenv superset_pw SUPERSET_NEW_PASSWORD
+SELECT 'CREATE ROLE superset' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'superset')\gexec
+ALTER ROLE superset WITH LOGIN PASSWORD :'superset_pw';
+SELECT 'CREATE DATABASE superset OWNER superset' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'superset')\gexec
+SQL
+unset SUPERSET_NEW_PASSWORD
+
+echo "==> $env: superset bootstrap"
+CODE_VITALS_READER_URI="postgresql+psycopg2://code_vitals_reader:$CODE_VITALS_READER_PASSWORD@$CODE_VITALS_DB_HOST:5432/code_vitals"
+export CODE_VITALS_READER_URI
+compose --profile init run --rm --pull "$pull" superset-init
+unset CODE_VITALS_READER_URI
+
+echo "==> $env: superset"
+compose up -d --pull "$pull" --wait --wait-timeout 300 superset
 echo "==> $env: deployed"

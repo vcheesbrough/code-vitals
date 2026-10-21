@@ -81,7 +81,9 @@ case "$answer" in
     echo "ERROR: Authentik refused the authorize request: $answer" >&2
     exit 1
     ;;
-  "302 https://auth.desync.link/"*) ;;
+  # Only Authentik's sign-in flow counts: any other page of Authentik's (an
+  # access-denied flow, an error page) means the request was turned away.
+  "302 https://auth.desync.link/if/flow/"* | "302 https://auth.desync.link/flows/-/default/authentication/"*) ;;
   *)
     echo "ERROR: expected Authentik to send the browser on to its sign-in flow, got: $answer" >&2
     exit 1

@@ -43,7 +43,7 @@ failures=0
 pass() { echo "ok   - $1"; }
 fail() { echo "FAIL - $1" >&2; failures=$((failures + 1)); }
 
-GOOD_AUTHORIZE="302 https://auth.desync.link/flows/-/default/authentication/?next=%2Fapplication%2Fo%2Fauthorize%2F"
+GOOD_AUTHORIZE="302 https://auth.desync.link/if/flow/default-authentication-flow/?response_type=code&client_id=code-vitals-dev"
 
 # setup <health body> <login answer> [denied queries...]
 # Authentik's answer to the authorize request comes from $AUTHORIZE (default: accepted).
@@ -93,6 +93,12 @@ if run; then fail "foreign authorize: expected failure"; elif grep -q "expected 
 AUTHORIZE="302 https://code-vitals-dev.desync.link/oauth-authorized/authentik?error=invalid_request&error_description=The%20request%20is%20otherwise%20malformed" \
     setup OK "$GOOD_LOGIN" "SELECT 1 FROM repo LIMIT 1"
 if run; then fail "authentik refusal: expected failure"; elif grep -q "Authentik refused the authorize request" "$WORK_DIR/out"; then pass "an authorize request Authentik refuses fails"; else fail "authentik refusal: $(cat "$WORK_DIR/out")"; fi
+
+AUTHORIZE="302 https://auth.desync.link/flows/-/default/authentication/?next=x" setup OK "$GOOD_LOGIN" "SELECT 1 FROM repo LIMIT 1"
+if run; then pass "the legacy /flows/ sign-in path is accepted"; else fail "legacy flows path: $(cat "$WORK_DIR/out")"; fi
+
+AUTHORIZE="302 https://auth.desync.link/if/admin/" setup OK "$GOOD_LOGIN" "SELECT 1 FROM repo LIMIT 1"
+if run; then fail "other authentik page: expected failure"; elif grep -q "send the browser on to its sign-in flow" "$WORK_DIR/out"; then pass "a redirect to another Authentik page fails"; else fail "other page: $(cat "$WORK_DIR/out")"; fi
 
 AUTHORIZE="400 " setup OK "$GOOD_LOGIN" "SELECT 1 FROM repo LIMIT 1"
 if run; then fail "authentik 400: expected failure"; elif grep -q "send the browser on to its sign-in flow" "$WORK_DIR/out"; then pass "an authorize request Authentik rejects outright fails"; else fail "authentik 400: $(cat "$WORK_DIR/out")"; fi

@@ -4,8 +4,11 @@
 #   1. https://<host>/health answers OK (retried while Traefik picks the
 #      container up and Superset starts);
 #   2. https://<host>/login/authentik redirects to Authentik's authorize
-#      endpoint with this environment's client_id and redirect_uri — sign-in
-#      is wired, without needing a user;
+#      endpoint with this environment's client_id and redirect_uri, and
+#      Authentik ACCEPTS that request — it sends an anonymous browser on to its
+#      own sign-in flow rather than bouncing back with `error=` (it validates
+#      the request before asking anyone to sign in). Sign-in is wired, without
+#      needing a user;
 #   3. the reader role — Superset's datasource — can read the freshness view
 #      and is refused on a base table.
 #
@@ -66,6 +69,21 @@ case "$code $location" in
     ;;
   *)
     echo "ERROR: expected a 302 to Authentik's authorize endpoint, got: $code $location" >&2
+    exit 1
+    ;;
+esac
+echo "  ok"
+
+echo "==> Authentik accepts the authorize request"
+answer=$(curl -sS -o /dev/null --max-time 10 -w '%{http_code} %{redirect_url}' "$location")
+case "$answer" in
+  *"error="*)
+    echo "ERROR: Authentik refused the authorize request: $answer" >&2
+    exit 1
+    ;;
+  "302 https://auth.desync.link/"*) ;;
+  *)
+    echo "ERROR: expected Authentik to send the browser on to its sign-in flow, got: $answer" >&2
     exit 1
     ;;
 esac

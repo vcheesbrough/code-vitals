@@ -2,7 +2,7 @@
 name = "code-vitals"
 # MAJOR.MINOR is the iteration (AGENTS.md); the patch is a placeholder. CI
 # replaces it with the push pipeline's number (scripts/compute-release-tag.sh).
-version = "0.5.0"
+version = "0.6.0"
 description = "Measures of a project's code recorded at every trunk commit."
 readme = "README.md"
 license = "PolyForm-Noncommercial-1.0.0"

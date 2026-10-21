@@ -273,10 +273,23 @@ def _catch_up(
     # Every run, not only for new commits: a release tag is pushed after the
     # deploy, i.e. after the push-time run already measured its commit.
     tags = clone.tags_by_commit()
+    # First-parent history: each commit's parent is the one before it.
+    parents = dict(zip(history[1:], history[:-1], strict=True))
     measured = failed = 0
     for sha, missing in work:
         try:
-            _measure_commit(conn, clone, repo, repo_id, sha, missing, measure_ids, ruleset, tags)
+            _measure_commit(
+                conn,
+                clone,
+                repo,
+                repo_id,
+                sha,
+                parents.get(sha),
+                missing,
+                measure_ids,
+                ruleset,
+                tags,
+            )
         except Exception:
             failed += 1
             log.exception(
@@ -300,6 +313,7 @@ def _measure_commit(
     repo: RepoConfig,
     repo_id: int,
     sha: str,
+    parent: str | None,
     missing: Sequence[Measure],
     measure_ids: dict[tuple[str, int], int],
     ruleset: _Ruleset,
@@ -314,7 +328,9 @@ def _measure_commit(
             tree = clone.extract_tree(sha, Path(tmp))
             if tree.skipped:
                 log.info("skipped %d tree entries at %s", tree.skipped, sha)
-            context = CommitContext(repo.name, sha, tree.path, tree.files, ruleset.rules)
+            context = CommitContext(
+                repo.name, sha, tree.path, tree.files, ruleset.rules, parent=parent, clone=clone
+            )
             for m in missing:
                 measure_id = measure_ids[(m.name, m.version)]
                 started = time.monotonic()

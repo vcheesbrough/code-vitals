@@ -25,6 +25,18 @@ class CommitInfo:
     subject: str
 
 
+# git's well-known empty tree: the "parent" of a root commit.
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+
+@dataclass(frozen=True)
+class FileChange:
+    path: str
+    added: int  # 0 for a binary file
+    deleted: int
+    binary: bool
+
+
 @dataclass(frozen=True)
 class ExtractedTree:
     path: Path
@@ -92,6 +104,25 @@ class Clone:
             obj, peeled, name = line.split("\x00")
             tags[peeled or obj].append(name)
         return {sha: sorted(names) for sha, names in tags.items()}
+
+    def changes(self, parent: str | None, sha: str) -> list[FileChange]:
+        """Per-file line changes from `parent` (the empty tree for a root
+        commit) to `sha`. Renames are a delete plus an add: rename detection is
+        a similarity heuristic that may differ between git versions, and
+        recorded values must not."""
+        out = self._git(
+            "diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", parent or EMPTY_TREE, sha
+        )
+        changes = []
+        for record in out.split("\0"):
+            if not record:
+                continue
+            added, deleted, path = record.split("\t", 2)
+            binary = added == "-"
+            changes.append(
+                FileChange(path, 0 if binary else int(added), 0 if binary else int(deleted), binary)
+            )
+        return changes
 
     def read_file(self, sha: str, path: str) -> str | None:
         """A file's content at a commit, or None if it did not exist there."""

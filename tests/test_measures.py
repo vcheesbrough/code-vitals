@@ -7,7 +7,7 @@ import pytest
 
 from code_vitals import analysis
 from code_vitals.areas import ruleset
-from code_vitals.measures import CommitContext, FunctionRow, Value, registered
+from code_vitals.measures import CommitContext, FunctionRow, Kind, Value, registered
 from code_vitals.measures.complexity import (
     ComplexityTotal,
     FunctionHotspots,
@@ -121,6 +121,8 @@ def test_tokei_and_lizard_run_once_per_commit(
     monkeypatch.setattr(analysis, "run_tokei", counting_tokei)
     monkeypatch.setattr(analysis, "run_lizard", counting_lizard)
     for measure in registered():
+        if measure.kind is Kind.FLOW:  # churn diffs a clone; this tree has none
+            continue
         list(measure.compute(context))
     assert calls == {"tokei": 1, "lizard": 1}
 

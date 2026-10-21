@@ -17,6 +17,7 @@ from typing import Protocol
 
 from code_vitals import analysis
 from code_vitals.areas import AreaRuleset
+from code_vitals.gitrepo import Clone, FileChange
 
 
 class Kind(StrEnum):
@@ -54,6 +55,10 @@ class CommitContext:
     tree: Path  # the commit's files, extracted
     files: int  # regular files in the tree
     ruleset: AreaRuleset
+    # The commit's first parent (None for a root commit) and the clone, for
+    # measures of what the commit changed.
+    parent: str | None = None
+    clone: Clone | None = None
     _area_cache: dict[str, str | None] = field(default_factory=dict, repr=False)
 
     def area_of(self, path: str) -> str | None:
@@ -65,6 +70,27 @@ class CommitContext:
     def tokei(self) -> list[analysis.TokeiFile]:
         """tokei's per-file counts for the measured (not excluded) files."""
         return [f for f in analysis.run_tokei(self.tree) if self.area_of(f.path) is not None]
+
+    @cached_property
+    def changes(self) -> list[FileChange]:
+        """What the commit changed against its first parent, measured files only."""
+        if self.clone is None:
+            raise RuntimeError("this context has no clone to diff against")
+        return [
+            c for c in self.clone.changes(self.parent, self.sha) if self.area_of(c.path) is not None
+        ]
+
+    def text_files(self, glob: str) -> list[tuple[str, str]]:
+        """(path, text) of measured files matching `glob` (relative to the tree)."""
+        found = []
+        for p in sorted(self.tree.glob(glob)):
+            if not p.is_file() or p.is_symlink():
+                continue
+            path = p.relative_to(self.tree).as_posix()
+            if self.area_of(path) is None:
+                continue
+            found.append((path, p.read_text(encoding="utf-8", errors="replace")))
+        return found
 
     @cached_property
     def lizard(self) -> list[analysis.LizardFile]:
@@ -90,6 +116,7 @@ class Measure(Protocol):
 
 def registered() -> list[Measure]:
     """Every measure the collector records, in a stable order."""
+    from code_vitals.measures.churn import FilesChanged, LinesAdded, LinesDeleted
     from code_vitals.measures.complexity import (
         ComplexityTotal,
         FunctionHotspots,
@@ -99,6 +126,7 @@ def registered() -> list[Measure]:
         Nloc,
     )
     from code_vitals.measures.files import Files
+    from code_vitals.measures.functionality import E2eScenarios, Operations
     from code_vitals.measures.size import LinesOfCode, SourceFiles
 
     return [
@@ -111,4 +139,9 @@ def registered() -> list[Measure]:
         FunctionsOver10(),
         MaxFunctionComplexity(),
         FunctionHotspots(),
+        LinesAdded(),
+        LinesDeleted(),
+        FilesChanged(),
+        Operations(),
+        E2eScenarios(),
     ]

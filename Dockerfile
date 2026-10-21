@@ -32,6 +32,10 @@ RUN --mount=type=cache,id=code-vitals-uv-cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable
 
 FROM build AS test
+# The collector tests build real git repositories.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
 RUN --mount=type=cache,id=code-vitals-uv-cache,target=/root/.cache/uv \
     uv sync --frozen
 COPY tests ./tests

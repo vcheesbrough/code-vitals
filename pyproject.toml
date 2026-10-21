@@ -2,7 +2,7 @@
 name = "code-vitals"
 # MAJOR.MINOR is the iteration (AGENTS.md); the patch is a placeholder. CI
 # replaces it with the push pipeline's number (scripts/compute-release-tag.sh).
-version = "0.3.0"
+version = "0.4.0"
 description = "Measures of a project's code recorded at every trunk commit."
 readme = "README.md"
 license = "PolyForm-Noncommercial-1.0.0"
@@ -12,6 +12,13 @@ dependencies = [
     # Pinned exactly: a lizard upgrade changes measured values, so it is a
     # measure version bump (AGENTS.md review criteria), never a silent update.
     "lizard==1.24.1",
+    # OpenTelemetry, pinned as one set (agent-shared observability skill,
+    # references/python.md). Only code_vitals.telemetry imports the SDK and
+    # exporter; everything else uses the API.
+    "opentelemetry-api==1.45.1",
+    "opentelemetry-exporter-otlp-proto-http==1.45.1",
+    "opentelemetry-proto==1.45.1",
+    "opentelemetry-sdk==1.45.1",
     "psycopg[binary]==3.3.6",
 ]
 

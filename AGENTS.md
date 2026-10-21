@@ -137,13 +137,25 @@ core, not saved for the `1.0.0` card, which is only the sign-off.
 - **The collector is a scheduled job:** each run is an entry point with its own
   root span. It force-flushes all signals on exit within a bounded timeout
   (~5 s), so telemetry can never noticeably slow a build.
-- **Logs go to stdout as well as OTLP**, because the Woodpecker step log is
-  where a human looks first.
+- **Logs: OTLP is the record; the CI step log gets plain text.** Structured
+  log records go over OTLP (trace-correlated in Loki). stdout carries a few
+  human lines (run start, summary) and stderr every WARNING/ERROR with its
+  traceback, because the Woodpecker step log is where a human looks first —
+  with or without telemetry.
 - **Not opted into dashboards or alerts** (skill §8). Freshness — each repo's
   last recorded commit and its age — is a SQL view and a Superset tile over the
   data itself, not telemetry, because it also catches a collector that never
   ran.
 - Superset and Postgres are third-party and outside the product contract.
+- **How it is built** (card #494): `src/code_vitals/telemetry.py` is the only
+  module that imports the OpenTelemetry SDK or exporters
+  (`tests/test_boundaries.py`); product code emits through
+  `src/code_vitals/obs.py` (API only: instruments, attribute keys, span
+  helpers) and logs under the `code_vitals` logger — the OTLP log handler goes
+  there, never on the root logger (it deadlocks the flush when the collector is
+  down). OTLP over http/protobuf to `monitor-alloy:4318` on `proxy-backend` is
+  deliberate; a dedicated telemetry network was considered and rejected. The
+  Python binding is the observability skill's `references/python.md`.
 
 ### Deviations register
 

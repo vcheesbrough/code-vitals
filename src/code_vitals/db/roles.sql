@@ -27,7 +27,8 @@ REVOKE CREATE ON SCHEMA public FROM PUBLIC, code_vitals_writer, code_vitals_read
 GRANT USAGE ON SCHEMA public TO code_vitals_writer, code_vitals_reader;
 
 GRANT SELECT, INSERT, UPDATE
-    ON repo, commit, measure, area_ruleset, area, measurement, function_complexity, run
+    ON repo, commit, measure, area_ruleset, area, measurement, function_complexity, run,
+       commit_measure
     TO code_vitals_writer;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO code_vitals_writer;
 

@@ -57,7 +57,7 @@ position:
 
 
         The **Commit** filter picks the moment the Hotspots table shows; the Week range does not apply
-        to it or to Freshness. This dashboard is code: edit `superset/dashboard/` in the code-vitals repo
+        to it or to Freshness, and Area not to the test share (a ratio across areas). This dashboard is code: edit `superset/dashboard/` in the code-vitals repo
         — changes made here are replaced on the next deploy.'
       height: 22
       width: 12
@@ -488,6 +488,7 @@ metadata:
       - ROOT_ID
       excluded:
       - 1
+      - 4
     type: NATIVE_FILTER
   - id: NATIVE_FILTER-week
     name: Week

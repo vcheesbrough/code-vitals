@@ -275,10 +275,15 @@ def test_filters_cover_repo_area_week_and_iteration() -> None:
         assert target["column"]["name"] == column
 
 
+# Charts a filter skips although their dataset has its column: Hotspots'
+# moment is the Commit filter's, and the test share is a ratio across areas
+# (an Area filter would make it 0% or 100%).
+EXCEPTIONS = {("Week", "Hotspots"), ("Area", "Test share of lines")}
+
+
 def test_filters_reach_every_chart_that_has_their_column() -> None:
     # A filter applies to every chart in scope whose dataset has its column,
-    # so it is excluded only where the column is missing — and from
-    # Hotspots for Week, whose moment the Commit filter picks.
+    # so it is excluded only where the column is missing, or by EXCEPTIONS.
     for name, column in [
         ("Repo", "repo"),
         ("Area", "area"),
@@ -289,12 +294,15 @@ def test_filters_reach_every_chart_that_has_their_column() -> None:
         assert FILTERS[name]["scope"]["rootPath"] == ["ROOT_ID"]
         for data in CHARTS.values():
             has_column = column in _columns(DATASETS[data["dataset_uuid"]])
-            if name == "Week" and data["slice_name"] == "Hotspots":
+            if (name, data["slice_name"]) in EXCEPTIONS:
                 assert PLACED[data["uuid"]] in excluded
             else:
                 assert (PLACED[data["uuid"]] in excluded) == (not has_column), (name, data)
     assert FILTERS["Repo"]["scope"]["excluded"] == []
-    assert set(FILTERS["Area"]["scope"]["excluded"]) == {_chart_id("freshness")}
+    assert set(FILTERS["Area"]["scope"]["excluded"]) == {
+        _chart_id("freshness"),
+        _chart_id("tile_test_share"),
+    }
 
 
 def test_week_filter_reaches_every_time_series() -> None:

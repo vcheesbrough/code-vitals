@@ -183,8 +183,9 @@ checks that, the references, the filters and the colours.
 
 Ratios are Superset metrics (complexity per 1,000 lines, average complexity
 per function, test share of lines). Filters: Repo, Area, Week (a time range)
-and Iteration apply to every chart whose dataset has the column; Commit picks
-the moment of the Hotspots table (newest first). The **Freshness** table, one
+and Iteration apply to every chart whose dataset has the column, except Area
+on the test share (a ratio across areas); Commit picks the moment of the
+Hotspots table (newest first), which the Week range leaves alone. The **Freshness** table, one
 row per repo, is the pipeline's health check (no alerts, by decision). Colours
 come from the dataviz reference palette (`codeVitals` in
 `superset_config.py`), one fixed slot per repo and per area.

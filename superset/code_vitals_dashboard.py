@@ -104,12 +104,12 @@ def import_bundle(contents: dict[str, str]) -> dict[str, int]:
                 "dashboards/": ImportV1DashboardSchema(),
                 "datasets/": ImportV1DatasetSchema(),
             },
-            {},
-            exceptions,
-            {},
-            {},
-            {},
-            {},
+            passwords={},
+            exceptions=exceptions,
+            ssh_tunnel_passwords={},
+            ssh_tunnel_private_keys={},
+            ssh_tunnel_priv_key_passwords={},
+            encrypted_extra_secrets={},
         )
         if exceptions:
             raise CommandInvalidError("the dashboard bundle is invalid", exceptions)

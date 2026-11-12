@@ -94,6 +94,14 @@ Two environments on mini, each its own compose project of `deploy/compose.yaml`:
 | Authentik application / groups | `code-vitals-dev` / `code-vitals-dev-users`, `-admins` | `code-vitals` / `code-vitals-users`, `-admins` |
 | Deployed by | Woodpecker *Deploy*, target `dev`, **any branch** (`.woodpecker/deploy-dev.yml`) | target `prod`, **`main` only**, gated in `when:` (`.woodpecker/deploy-prod.yml`) |
 
+- **Every deployment collects and checks** (card #497): after migrate, one
+  step per measured repo runs the deployed image by digest
+  (`scripts/run-collector.sh`: clone, `collect --trigger backfill`,
+  `check-repo`), then `check` runs `check-status`; `tag-release` waits on it.
+  A measure or ruleset bump therefore backfills in dev from the branch and in
+  prod on release, and must update `src/code_vitals/expected_values.toml` in
+  the same PR. Only prod moves `:stable`, in `promote-stable`, after
+  `tag-release`.
 - **A push never deploys.** A deployment promotes the image the push already
   published (resolved through the commit, then used by digest) and never
   rebuilds. The git tag is pushed only after it succeeds.
@@ -116,7 +124,8 @@ Two environments on mini, each its own compose project of `deploy/compose.yaml`:
   (with the six secrets and a `proxy-backend` network) runs a stack on a local
   docker for trying changes; never point it at mini by hand.
 - `tests/test_pipelines.py` pins the gates: prod only from `main`, dev only to
-  dev, a push never deploys, every step image pinned by digest. **The gates
+  dev, a push never deploys, every step image pinned by digest, every repo
+  collected and checked before the tag, `:stable` moved by prod only and last. **The gates
   guard against accidents, not against a deliberate change** — see the trust
   assumption in § Deviations register.
 

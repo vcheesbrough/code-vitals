@@ -13,6 +13,13 @@ repos' push workflows. Safe to run concurrently and to interrupt:
   still measured, the run is recorded as a failure (so `freshness` shows it),
   and the failed commit is retried by the next run.
 
+A run with no failed commit has measured every trunk commit up to the head it
+started from, for every version it ran: it records that per repo
+(`measure_backfill`), and a version every repo has finished turns `complete`,
+which is when the current_* views switch to it. So does the repo's area
+ruleset. A non-recomputable version is measured only at commits from its
+release on.
+
 A run row exists from the moment the repo is known, so every failure after
 that — a bad clone, a changed measure definition — is recorded too.
 """
@@ -20,8 +27,9 @@ that — a bad clone, a changed measure definition — is recorded too.
 import logging
 import tempfile
 import time
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 import psycopg
@@ -94,7 +102,7 @@ def collect(
                 clone = Clone(clone_path)
                 head = clone.resolve_trunk(repo.trunk)
                 span.set_attribute(obs.HEAD_SHA, head)
-                measure_ids = _sync_measures(conn, measures)
+                measure_ids, starts = _sync_measures(conn, measures)
                 ruleset = _sync_ruleset(conn, repo_id, repo.areas)
                 with _RepoLock(conn, repo.name):
                     result = _catch_up(
@@ -106,6 +114,7 @@ def collect(
                         head,
                         measures,
                         measure_ids,
+                        starts,
                         ruleset,
                         trigger,
                     )
@@ -151,8 +160,16 @@ def _start_run(
     return int(str(row[0]))
 
 
-def _sync_measures(conn: Conn, measures: Sequence[Measure]) -> dict[tuple[str, int], int]:
+MeasureKey = tuple[str, int]
+
+
+def _sync_measures(
+    conn: Conn, measures: Sequence[Measure]
+) -> tuple[dict[MeasureKey, int], dict[MeasureKey, datetime]]:
+    """Register the measures; returns their ids, and the release time of each
+    non-recomputable one (it cannot be computed at earlier commits)."""
     ids = {}
+    starts = {}
     for m in measures:
         with obs.db_span("INSERT", "register measure"):
             conn.execute(
@@ -161,7 +178,7 @@ def _sync_measures(conn: Conn, measures: Sequence[Measure]) -> dict[tuple[str, i
                 (m.name, m.version, m.unit, str(m.kind), m.definition, m.recomputable),
             )
             row = conn.execute(
-                "SELECT id, unit, kind::text, recomputable, definition FROM measure"
+                "SELECT id, unit, kind::text, recomputable, definition, released_at FROM measure"
                 " WHERE name = %s AND version = %s",
                 (m.name, m.version),
             ).fetchone()
@@ -173,7 +190,10 @@ def _sync_measures(conn: Conn, measures: Sequence[Measure]) -> dict[tuple[str, i
                 " new version"
             )
         ids[(m.name, m.version)] = int(str(row[0]))
-    return ids
+        if not m.recomputable:
+            assert isinstance(row[5], datetime)
+            starts[(m.name, m.version)] = row[5]
+    return ids, starts
 
 
 def _sync_ruleset(conn: Conn, repo_id: int, rules: AreaRuleset) -> _Ruleset:
@@ -239,7 +259,8 @@ def _catch_up(
     run_id: int,
     head: str,
     measures: Sequence[Measure],
-    measure_ids: dict[tuple[str, int], int],
+    measure_ids: dict[MeasureKey, int],
+    starts: dict[MeasureKey, datetime],
     ruleset: _Ruleset,
     trigger: obs.Trigger,
 ) -> RunResult:
@@ -257,9 +278,19 @@ def _catch_up(
                 (repo_id, ruleset.id),
             )
         }
+    committed_at = clone.commit_times(head) if starts else {}
+
+    def due(m: Measure, sha: str) -> bool:
+        start = starts.get((m.name, m.version))
+        return start is None or committed_at[sha] >= start
+
     work = []
     for sha in history:
-        missing = [m for m in measures if (sha, measure_ids[(m.name, m.version)]) not in done]
+        missing = [
+            m
+            for m in measures
+            if (sha, measure_ids[(m.name, m.version)]) not in done and due(m, sha)
+        ]
         if missing:
             work.append((sha, missing))
     backlog = len(work)
@@ -302,6 +333,8 @@ def _catch_up(
         measured += 1
         obs.COMMITS_MEASURED.add(1, {obs.TRIGGER: str(trigger)})
     _refresh_tags(conn, repo_id, history, tags)
+    if not failed:
+        _complete_backfill(conn, repo_id, run_id, head, measure_ids.values(), ruleset.id)
     outcome = obs.Outcome.FAILURE if failed else obs.Outcome.SUCCESS
     _finish_run(conn, run_id, outcome, measured)
     return RunResult(run_id, outcome, backlog, measured, failed)
@@ -315,7 +348,7 @@ def _measure_commit(
     sha: str,
     parent: str | None,
     missing: Sequence[Measure],
-    measure_ids: dict[tuple[str, int], int],
+    measure_ids: dict[MeasureKey, int],
     ruleset: _Ruleset,
     tags: dict[str, list[str]],
 ) -> None:
@@ -424,6 +457,42 @@ def _refresh_tags(
             "UPDATE commit SET tags = '{}' WHERE repo_id = %s AND tags <> '{}'"
             " AND NOT (sha = ANY(%s))",
             (repo_id, list(tagged)),
+        )
+
+
+def _complete_backfill(
+    conn: Conn,
+    repo_id: int,
+    run_id: int,
+    head: str,
+    measure_ids: Collection[int],
+    ruleset_id: int,
+) -> None:
+    """Record that this repo is caught up on these versions, then complete
+    every one of them that every repo is caught up on. One UPDATE completes
+    them all, so the views switch together; and runs for different repos
+    cannot both miss the last row, since each inserts (and commits) before its
+    UPDATE reads. "Every repo" is every repo row: on an empty database a repo
+    not yet registered does not count, which is harmless — there is no older
+    version for the views to switch away from."""
+    with obs.db_span("INSERT", "record backfill"), conn.cursor() as cur:
+        cur.executemany(
+            "INSERT INTO measure_backfill (repo_id, measure_id, head_sha, run_id)"
+            " VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING",
+            [(repo_id, measure_id, head, run_id) for measure_id in measure_ids],
+        )
+    with obs.db_span("UPDATE", "complete measures"):
+        conn.execute(
+            "UPDATE measure m SET status = 'complete'"
+            " WHERE m.id = ANY(%s) AND m.status = 'backfilling'"
+            " AND NOT EXISTS (SELECT 1 FROM repo r WHERE NOT EXISTS ("
+            "  SELECT 1 FROM measure_backfill b WHERE b.repo_id = r.id AND b.measure_id = m.id))",
+            (list(measure_ids),),
+        )
+    with obs.db_span("UPDATE", "complete ruleset"):
+        conn.execute(
+            "UPDATE area_ruleset SET status = 'complete' WHERE id = %s AND status = 'backfilling'",
+            (ruleset_id,),
         )
 
 

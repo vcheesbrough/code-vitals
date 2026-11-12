@@ -3,7 +3,9 @@
 Ported in spirit from sovereign-config's tests/pipeline_prod_gating.rs: prod is
 deployable from `main` only, enforced in the workflow's own `when:` so a
 deployment from another branch never starts; dev from any branch; a push never
-deploys; and every image is pinned by digest.
+deploys; and every image is pinned by digest. Also that every deployment
+collects and checks every repo with the deployed image before it is tagged,
+and that only prod moves :stable, last.
 """
 
 from pathlib import Path
@@ -11,6 +13,8 @@ from typing import Any
 
 import pytest
 import yaml
+
+from code_vitals.repos import REPOS
 
 WOODPECKER = Path(__file__).resolve().parent.parent / ".woodpecker"
 
@@ -58,12 +62,13 @@ def test_dev_deploys_dev_and_prod_deploys_prod() -> None:
     assert "deploy-stack.sh dev " in deploy_commands("deploy-dev.yml")
     assert "deploy-stack.sh prod " in deploy_commands("deploy-prod.yml")
     for env in ("dev", "prod"):
-        environment = _workflow(f"deploy-{env}.yml")["steps"]["deploy"]["environment"]
-        secrets = {
-            value["from_secret"] for value in environment.values() if isinstance(value, dict)
-        }
         other = "prod" if env == "dev" else "dev"
-        assert not any(s.startswith(f"code_vitals_{other}_") for s in secrets)
+        for name, step in _workflow(f"deploy-{env}.yml")["steps"].items():
+            environment = step.get("environment") or {}
+            secrets = {
+                value["from_secret"] for value in environment.values() if isinstance(value, dict)
+            }
+            assert not any(s.startswith(f"code_vitals_{other}_") for s in secrets), name
 
 
 def test_dev_applies_only_the_dev_blueprint_with_only_dev_secrets() -> None:
@@ -89,7 +94,46 @@ def test_a_failed_smoke_check_leaves_the_commit_untagged(env: str) -> None:
     steps = _workflow(f"deploy-{env}.yml")["steps"]
     assert "smoke-superset.sh " + env in "\n".join(steps["smoke"]["commands"])
     assert steps["smoke"]["depends_on"] == ["deploy"]
-    assert steps["tag-release"]["depends_on"] == ["smoke"]
+    assert steps["tag-release"]["depends_on"] == ["smoke", "check"]
+
+
+@pytest.mark.parametrize("env", ["dev", "prod"])
+def test_every_repo_is_collected_and_checked_with_the_deployed_image(env: str) -> None:
+    steps = _workflow(f"deploy-{env}.yml")["steps"]
+    collects = sorted(name for name in steps if name.startswith("collect-"))
+    assert collects == sorted(f"collect-{repo}" for repo in REPOS)
+    for repo in REPOS:
+        step = steps[f"collect-{repo}"]
+        assert step["depends_on"] == ["deploy"]
+        assert (
+            f'./scripts/run-collector.sh {env} "$$(cat .deploy-image)" repo {repo}'
+            in step["commands"]
+        )
+    assert sorted(steps["check"]["depends_on"]) == collects
+    assert (
+        f'./scripts/run-collector.sh {env} "$$(cat .deploy-image)" status'
+        in (steps["check"]["commands"])
+    )
+
+
+def test_the_collect_script_knows_exactly_the_configured_repos() -> None:
+    script = (Path(__file__).resolve().parent.parent / "scripts" / "run-collector.sh").read_text()
+    assert "      v-note | bored | sovereign-config) ;;" in script
+    assert sorted(REPOS) == sorted(["v-note", "bored", "sovereign-config"])
+
+
+def test_only_prod_moves_stable_and_only_after_it_is_checked_and_tagged() -> None:
+    prod = _workflow("deploy-prod.yml")["steps"]
+    assert prod["promote-stable"]["depends_on"] == ["tag-release"]
+    # Last: nothing waits on it, so nothing can run after :stable moved.
+    assert not any("promote-stable" in s.get("depends_on", []) for s in prod.values())
+    for env, steps in (("dev", _workflow("deploy-dev.yml")["steps"]), ("prod", prod)):
+        for name, step in steps.items():
+            text = yaml.safe_dump(step)
+            if env == "prod" and name == "promote-stable":
+                assert "code-vitals-collector:stable" in text
+            else:
+                assert ":stable" not in text, f"{env}: {name} touches :stable"
 
 
 def test_the_superset_image_is_published_before_the_collector() -> None:

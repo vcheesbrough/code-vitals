@@ -96,8 +96,13 @@ def test_first_run_records_every_trunk_commit(db: tuple[str, str], repo: Fixture
         " ORDER BY c.committed_at",
     )
     assert [v[1] for v in values] == [1.0, 3.0, 2.0]
+    # The only repo has every trunk commit measured: the version is complete.
     assert _rows(owner, "SELECT name, version, status::text FROM measure") == [
-        ("files", 1, "backfilling")
+        ("files", 1, "complete")
+    ]
+    assert _rows(owner, "SELECT version, status::text FROM area_ruleset") == [(1, "complete")]
+    assert _rows(owner, "SELECT head_sha, run_id FROM measure_backfill") == [
+        (repo.shas[-1], result.run_id)
     ]
     assert _rows(
         owner,
@@ -397,6 +402,12 @@ def test_a_ruleset_bump_re_measures_the_repo_into_the_new_areas(
         "SELECT count(*) FROM measurement x JOIN measure m ON m.id = x.measure_id"
         " WHERE m.name = 'files'",
     ) == [(2,)]
+    # v2 completed with the run, so the view now reads its areas only.
+    assert _rows(
+        owner,
+        "SELECT area, sum(value) FROM current_measurement WHERE measure = 'functions'"
+        " GROUP BY 1 ORDER BY 1",
+    ) == [("a", 2.0), ("b", 1.0)]
 
 
 class UnknownArea(Files):
@@ -422,9 +433,6 @@ def test_the_hotspot_view_shows_areas_of_the_current_ruleset_only(
     repo = _app_repo(tmp_path)
     v1 = AreaRuleset(1, (), (("a/**", "a"), ("**", "tooling")))
     collect(writer, _config(v1), repo.path, Trigger.BACKFILL, BUILD, measures=[FunctionHotspots()])
-    with psycopg.connect(owner) as conn:
-        conn.execute("UPDATE measure SET status = 'complete'")
-        conn.execute("UPDATE area_ruleset SET status = 'complete'")
     hotspots = _rows(
         owner,
         "SELECT area, file, function, ccn FROM current_function_complexity ORDER BY sha, file",
@@ -467,3 +475,123 @@ def test_churn_per_commit_follows_the_first_parent_through_a_merge(
     # The merge brings in the whole feature branch against its first parent;
     # the side commits are not on the first-parent history at all.
     assert added == {c1: 2.0, c2: 0.0, merge: 4.0}  # c2 only deletes a line
+
+
+class FilesV2(Files):
+    """`files`, bumped: what a branch that changes a measure deploys."""
+
+    version = 2
+    definition = "Regular files, counted again (v2)."
+
+    def compute(self, context: CommitContext) -> Sequence[Value]:
+        return [Value(float(context.files) * 10)]
+
+
+class FilesV2FailsAt(FilesV2):
+    def __init__(self, sha: str) -> None:
+        self.sha = sha
+
+    def compute(self, context: CommitContext) -> Sequence[Value]:
+        if context.sha == self.sha:
+            raise RuntimeError("killed part way")
+        return super().compute(context)
+
+
+def _view(owner: str) -> list[tuple[object, ...]]:
+    return _rows(
+        owner,
+        "SELECT repo, measure_version, value FROM current_measurement"
+        " WHERE measure = 'files' ORDER BY repo, committed_at",
+    )
+
+
+def test_a_bumped_version_backfills_behind_the_old_one_then_switches(
+    db: tuple[str, str], repo: FixtureRepo
+) -> None:
+    owner, writer = db
+    collect(writer, FIXTURE, repo.path, Trigger.BACKFILL, BUILD, measures=ONLY_FILES)
+    assert _view(owner) == [("fixture", 1, 1.0), ("fixture", 1, 3.0), ("fixture", 1, 2.0)]
+
+    # The backfill dies part way: v2 has rows, but the views keep reading v1.
+    interrupted = collect(
+        writer,
+        FIXTURE,
+        repo.path,
+        Trigger.BACKFILL,
+        BUILD,
+        measures=[FilesV2FailsAt(repo.shas[1])],
+    )
+    assert interrupted.outcome is Outcome.FAILURE
+    assert _rows(owner, "SELECT version, status::text FROM measure ORDER BY version") == [
+        (1, "complete"),
+        (2, "backfilling"),
+    ]
+    assert {v[1] for v in _view(owner)} == {1}
+
+    # Redeploying finishes the backfill, and the views switch to v2 whole.
+    redeployed = collect(writer, FIXTURE, repo.path, Trigger.BACKFILL, BUILD, measures=[FilesV2()])
+    assert (redeployed.outcome, redeployed.commits_measured) == (Outcome.SUCCESS, 1)
+    assert _view(owner) == [("fixture", 2, 10.0), ("fixture", 2, 30.0), ("fixture", 2, 20.0)]
+    # v1's rows are untouched.
+    assert _rows(
+        owner,
+        "SELECT count(*) FROM measurement x JOIN measure m ON m.id = x.measure_id"
+        " WHERE m.version = 1",
+    ) == [(3,)]
+
+
+def test_a_version_completes_only_once_every_repo_has_backfilled_it(
+    db: tuple[str, str], tmp_path: Path
+) -> None:
+    owner, writer = db
+    (tmp_path / "first").mkdir()
+    (tmp_path / "second").mkdir()
+    first = three_commit_history(tmp_path / "first")
+    second = three_commit_history(tmp_path / "second")
+    other = RepoConfig("other", "main", FIXTURE.version_sources)
+    for config, clone in ((FIXTURE, first), (other, second)):
+        collect(writer, config, clone.path, Trigger.BACKFILL, BUILD, measures=ONLY_FILES)
+
+    collect(writer, FIXTURE, first.path, Trigger.BACKFILL, BUILD, measures=[FilesV2()])
+    assert _rows(owner, "SELECT status::text FROM measure WHERE version = 2") == [("backfilling",)]
+    assert {(v[0], v[1]) for v in _view(owner)} == {("fixture", 1), ("other", 1)}
+
+    collect(writer, other, second.path, Trigger.BACKFILL, BUILD, measures=[FilesV2()])
+    assert _rows(owner, "SELECT status::text FROM measure WHERE version = 2") == [("complete",)]
+    assert {(v[0], v[1]) for v in _view(owner)} == {("fixture", 2), ("other", 2)}
+
+
+class Snapshot(Files):
+    """A non-recomputable measure: it can only be read at the time it runs."""
+
+    name = "snapshot"
+    recomputable = False
+    definition = "Only knowable when measured."
+
+
+def test_a_non_recomputable_version_starts_from_its_release(
+    db: tuple[str, str], repo: FixtureRepo
+) -> None:
+    owner, writer = db
+    released_at = repo.git("show", "-s", "--format=%cI", repo.shas[1])
+    with psycopg.connect(owner) as conn:  # released between the first two commits
+        conn.execute(
+            "INSERT INTO measure (name, version, unit, kind, definition, recomputable,"
+            " released_at) VALUES (%s, 1, %s, %s, %s, false, %s)",
+            (Snapshot.name, Snapshot.unit, str(Snapshot.kind), Snapshot.definition, released_at),
+        )
+
+    result = collect(writer, FIXTURE, repo.path, Trigger.BACKFILL, BUILD, measures=[Snapshot()])
+
+    assert (result.outcome, result.backlog) == (Outcome.SUCCESS, 2)
+    assert [
+        r[0]
+        for r in _rows(
+            owner,
+            "SELECT c.sha FROM commit_measure cm JOIN commit c"
+            " ON c.id = cm.commit_id ORDER BY c.committed_at",
+        )
+    ] == repo.shas[1:]
+    assert _rows(owner, "SELECT status::text FROM measure") == [("complete",)]
+    again = collect(writer, FIXTURE, repo.path, Trigger.BACKFILL, BUILD, measures=[Snapshot()])
+    assert again.backlog == 0

@@ -36,6 +36,8 @@ class RepoConfig:
     # a repo that moved its version keeps an iteration across the move.
     version_sources: tuple[VersionSource, ...]
     areas: AreaRuleset = GENERIC
+    # Where `collect --fetch` clones it from: public, so no credentials.
+    url: str | None = None
 
 
 CARGO_SOURCES = (
@@ -56,6 +58,7 @@ REPOS: dict[str, RepoConfig] = {
             ("frontend/**", "web"),
             ("android/**", "android"),
         ),
+        "https://github.com/vcheesbrough/v-note.git",
     ),
     "bored": RepoConfig(
         "bored",
@@ -68,6 +71,7 @@ REPOS: dict[str, RepoConfig] = {
             ("shared/**", "shared"),
             ("mcp/**", "shared"),
         ),
+        "https://github.com/vcheesbrough/bored.git",
     ),
     "sovereign-config": RepoConfig(
         "sovereign-config",
@@ -81,6 +85,7 @@ REPOS: dict[str, RepoConfig] = {
             ("crates/**", "libraries"),
             ("proto/**", "libraries"),
         ),
+        "https://github.com/vcheesbrough/sovereign-config.git",
     ),
 }
 

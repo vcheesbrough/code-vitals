@@ -9,10 +9,13 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from code_vitals import cli
+from code_vitals import collect as collect_module
 from code_vitals.areas import AreaRuleset, ruleset
 from code_vitals.build_info import BuildInfo
 from code_vitals.collect import AreaRulesetConflict, MeasureDefinitionConflict, collect, lock_key
 from code_vitals.db.migrate import migrate
+from code_vitals.gitrepo import GitError
 from code_vitals.measures import CommitContext, Kind, Measure, Value, registered
 from code_vitals.measures.churn import LinesAdded
 from code_vitals.measures.complexity import FunctionHotspots, Functions
@@ -595,3 +598,56 @@ def test_a_non_recomputable_version_starts_from_its_release(
     assert _rows(owner, "SELECT status::text FROM measure") == [("complete",)]
     again = collect(writer, FIXTURE, repo.path, Trigger.BACKFILL, BUILD, measures=[Snapshot()])
     assert again.backlog == 0
+
+
+def test_without_a_clone_path_the_repo_is_fetched_from_its_url(
+    db: tuple[str, str], repo: FixtureRepo
+) -> None:
+    owner, writer = db
+    fetched = RepoConfig(FIXTURE.name, FIXTURE.trunk, FIXTURE.version_sources, url=str(repo.path))
+
+    result = collect(writer, fetched, None, Trigger.PUSH, BUILD, measures=ONLY_FILES)
+
+    assert (result.outcome, result.commits_measured) == (Outcome.SUCCESS, 3)
+    # Tags come with the clone, as for a deploy's clone.
+    assert _rows(owner, "SELECT tags FROM commit WHERE tags <> '{}'") == [(["0.2.9"],)]
+
+
+def test_a_failed_fetch_is_recorded_on_the_run(db: tuple[str, str], tmp_path: Path) -> None:
+    owner, writer = db
+    missing = RepoConfig(
+        FIXTURE.name, FIXTURE.trunk, FIXTURE.version_sources, url=str(tmp_path / "nowhere")
+    )
+    with pytest.raises(GitError, match=r"git clone of .* failed"):
+        collect(writer, missing, None, Trigger.PUSH, BUILD, measures=ONLY_FILES)
+    assert _rows(owner, "SELECT outcome::text FROM run") == [("failure",)]
+
+
+def test_fetching_a_repo_without_a_url_is_recorded_as_a_failure(db: tuple[str, str]) -> None:
+    owner, writer = db
+    with pytest.raises(ValueError, match="fixture has no URL to fetch from"):
+        collect(writer, FIXTURE, None, Trigger.PUSH, BUILD, measures=ONLY_FILES)
+    assert _rows(owner, "SELECT outcome::text FROM run") == [("failure",)]
+
+
+def test_cli_collect_fetch_clones_the_configured_url(
+    db: tuple[str, str],
+    repo: FixtureRepo,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    owner, writer = db
+    monkeypatch.setattr(collect_module, "registered", lambda: ONLY_FILES)
+    fetched = RepoConfig(FIXTURE.name, FIXTURE.trunk, FIXTURE.version_sources, url=str(repo.path))
+
+    status = cli.main(
+        ["collect", "--repo", "fixture", "--fetch", "--trigger", "push"],
+        {cli.DATABASE_URL_ENV: writer},
+        repos={"fixture": fetched},
+    )
+
+    assert status == 0
+    out = capsys.readouterr().out
+    assert f"code-vitals collect: fixture from {repo.path} (push)" in out
+    assert "fixture: 3 commit(s) measured of 3 to do" in out
+    assert _rows(owner, "SELECT trigger::text, outcome::text FROM run") == [("push", "success")]

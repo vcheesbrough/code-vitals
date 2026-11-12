@@ -61,6 +61,12 @@ CODE_VITALS_DATABASE_URL=postgresql://code_vitals_writer:…@code-vitals-db:5432
   code-vitals collect --repo bored --clone /path/to/full/clone --trigger push
 ```
 
+`--fetch` in place of `--clone` clones the repo from its URL in
+`src/code_vitals/repos.py` into a temporary directory first (a failed clone is
+recorded as a failed run). Each measured repo's trunk pushes run this through
+its `.woodpecker/code-vitals.yml`, copied from
+`deploy/measured-repo-workflow.yml` (AGENTS.md § Deviations register).
+
 Records every trunk commit (first-parent history of the repo's trunk) not yet
 measured, for every registered measure version (`src/code_vitals/measures/`),
 into the database as the writer role. Safe to rerun, to run concurrently (a

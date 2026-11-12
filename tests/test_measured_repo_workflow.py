@@ -63,8 +63,27 @@ def test_the_step_never_takes_the_shells_stdin() -> None:
     # buffer, so running the script cannot reliably catch it; this does.
     (step,) = workflow("v-note")["steps"].values()
     for line in step["commands"][0].splitlines():
-        code = line.split("#", 1)[0]
-        assert not re.match(r"\s*exec\b.*<", code), line
+        assert not TAKES_STDIN.search(line.split("#", 1)[0]), line
+
+
+# `exec <…` as any command on a line, not only the first (v-note's
+# scripts/test-code-vitals-workflow.sh uses the same pattern).
+TAKES_STDIN = re.compile(r"(?:^|[;&|(])\s*exec\b.*<")
+
+
+@pytest.mark.parametrize(
+    ("line", "takes"),
+    [
+        ("exec < /dev/null", True),
+        ("  set -eu; exec </dev/null", True),
+        ("true && exec 0< /dev/null", True),
+        ("exec > log", False),
+        ("# exec < /dev/null", False),
+        ('docker start --attach "$cid"', False),
+    ],
+)
+def test_the_stdin_pattern(line: str, takes: bool) -> None:
+    assert bool(TAKES_STDIN.search(line.split("#", 1)[0])) is takes
 
 
 def test_the_moving_tag_appears_only_in_the_collector_command() -> None:
@@ -102,12 +121,11 @@ def _run_step(tmp_path: Path, repo: str, *, start_exit: int = 0) -> tuple[int, l
         "CODE_VITALS_WRITER_PASSWORD": "writerpw0123",
         "CI_PIPELINE_NUMBER": "77",
     }
-    # As Woodpecker runs it: the script on the shell's stdin, behind more than
-    # a read buffer of other lines (it echoes each command first), so a
-    # command that took the shell's stdin would cut the script short.
-    padding = "".join(f"# woodpecker trace line {i:04d} {'.' * 60}\n" for i in range(300))
+    # As Woodpecker runs it: the script on the shell's stdin. bash, unlike
+    # dash, reads a pipe a byte at a time, so a command that takes the
+    # shell's stdin cuts the script short right there, whatever its length.
     status = subprocess.run(
-        ["sh"], input=(padding + script).encode(), env=env, capture_output=True
+        ["bash"], input=script.encode(), env=env, capture_output=True
     ).returncode
     return status, calls.read_text().splitlines(), created_env.read_text().strip()
 

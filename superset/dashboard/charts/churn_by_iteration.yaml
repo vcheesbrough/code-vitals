@@ -1,0 +1,81 @@
+slice_name: Churn per iteration
+description: Lines added plus deleted by each iteration's commits, per repo. Iteration numbers are per
+  repo.
+certified_by: null
+certification_details: null
+viz_type: echarts_timeseries_bar
+params:
+  viz_type: echarts_timeseries_bar
+  x_axis_sort_asc: true
+  x_axis_sort_series: name
+  x_axis_sort_series_ascending: true
+  x_axis_time_format: smart_date
+  rich_tooltip: true
+  tooltipTimeFormat: smart_date
+  show_legend: true
+  legendType: scroll
+  legendOrientation: top
+  row_limit: 10000
+  truncate_metric: true
+  show_empty_columns: true
+  comparison_type: values
+  annotation_layers: []
+  forecastEnabled: false
+  markerEnabled: false
+  zoomable: false
+  truncateXAxis: true
+  y_axis_bounds:
+  - null
+  - null
+  y_axis_title_margin: 15
+  x_axis_title_margin: 15
+  y_axis_title_position: Left
+  color_scheme: codeVitals
+  extra_form_data: {}
+  orientation: vertical
+  show_value: false
+  x_axis: iteration
+  xAxisForceCategorical: true
+  x_axis_sort: iteration
+  metrics:
+  - churn
+  groupby:
+  - repo
+  adhoc_filters:
+  - clause: WHERE
+    expressionType: SIMPLE
+    subject: week
+    operator: TEMPORAL_RANGE
+    comparator: No filter
+    isExtra: false
+    isNew: false
+    sqlExpression: null
+    filterOptionName: filter_week_temporal_range
+  - clause: WHERE
+    expressionType: SIMPLE
+    subject: iteration
+    operator: IS NOT NULL
+    comparator: null
+    isExtra: false
+    isNew: false
+    sqlExpression: null
+    filterOptionName: filter_iteration_is not null
+  - clause: WHERE
+    expressionType: SIMPLE
+    subject: measure
+    operator: IN
+    comparator:
+    - lines_added
+    - lines_deleted
+    isExtra: false
+    isNew: false
+    sqlExpression: null
+    filterOptionName: filter_measure_in
+  y_axis_format: SMART_NUMBER
+query_context: null
+cache_timeout: null
+uuid: d1072bc8-827a-5f0b-acdb-676985017b01
+version: 1.0.0
+dataset_uuid: bac94bf7-45a3-5c17-8db4-5e0bdb595362
+is_managed_externally: true
+external_url: https://github.com/vcheesbrough/code-vitals/blob/main/superset/dashboard/charts/churn_by_iteration.yaml

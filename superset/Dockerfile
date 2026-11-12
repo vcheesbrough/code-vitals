@@ -9,7 +9,10 @@ USER root
 RUN uv pip install --python /app/.venv/bin/python --no-cache \
     psycopg2-binary==2.9.13 \
     authlib==1.9.1
-COPY superset/superset_config.py superset/code_vitals_auth.py /app/pythonpath/
+COPY superset/superset_config.py superset/code_vitals_auth.py superset/code_vitals_dashboard.py \
+    /app/pythonpath/
+# The dashboard as code (card #500), imported by the bootstrap on every deploy.
+COPY superset/dashboard /app/code-vitals-dashboard
 COPY --chmod=0755 superset/bootstrap.sh /app/docker/code-vitals-bootstrap.sh
 
 ARG RELEASE_TAG=0.0.0-local

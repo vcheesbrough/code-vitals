@@ -1,0 +1,594 @@
+dashboard_title: code-vitals
+description: null
+css: ''
+slug: code-vitals
+certified_by: null
+certification_details: null
+published: true
+uuid: 6fbac0df-83d0-52f6-9076-0645f8000fc8
+position:
+  DASHBOARD_VERSION_KEY: v2
+  ROOT_ID:
+    children:
+    - GRID_ID
+    id: ROOT_ID
+    type: ROOT
+  GRID_ID:
+    children:
+    - ROW-intro
+    - ROW-health
+    - HEADER-size
+    - ROW-size
+    - ROW-complexity
+    - HEADER-change
+    - ROW-churn
+    - ROW-functionality
+    - HEADER-iterations
+    - ROW-iterations
+    - HEADER-hotspots
+    - ROW-hotspots
+    id: GRID_ID
+    parents:
+    - ROOT_ID
+    type: GRID
+  HEADER_ID:
+    id: HEADER_ID
+    meta:
+      text: code-vitals
+    type: HEADER
+  ROW-intro:
+    children:
+    - MARKDOWN-intro
+    id: ROW-intro
+    meta:
+      background: BACKGROUND_TRANSPARENT
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    type: ROW
+  MARKDOWN-intro:
+    children: []
+    id: MARKDOWN-intro
+    meta:
+      code: '**Snapshot** measures (size, complexity, operations, scenarios) show each repo''s state at
+        the end of each week: its last measured commit on or before that week, carried forward through
+        quiet weeks. **Flow** measures (churn) sum the week''s or the iteration''s commits. Ratios are
+        computed here, never stored. Lines are lizard''s NLOC. Iteration numbers are per repo.
+
+
+        The **Commit** filter picks the moment the Hotspots table shows; the Week range does not apply
+        to it or to Freshness, and Area not to the test share (a ratio across areas). This dashboard is code: edit `superset/dashboard/` in the code-vitals repo
+        — changes made here are replaced on the next deploy.'
+      height: 22
+      width: 12
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-intro
+    type: MARKDOWN
+  ROW-health:
+    children:
+    - CHART-freshness
+    - CHART-tile_lines
+    - CHART-tile_complexity_per_1000
+    - CHART-tile_test_share
+    id: ROW-health
+    meta:
+      background: BACKGROUND_TRANSPARENT
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    type: ROW
+  CHART-freshness:
+    children: []
+    id: CHART-freshness
+    meta:
+      chartId: 1
+      height: 40
+      sliceName: Freshness
+      uuid: 72f0dd2a-3bcf-5b22-af73-ad4d4fbc27d0
+      width: 6
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-health
+    type: CHART
+  CHART-tile_lines:
+    children: []
+    id: CHART-tile_lines
+    meta:
+      chartId: 2
+      height: 40
+      sliceName: Lines (NLOC)
+      uuid: 6b4c3c92-0f68-58dc-ab81-9e9c35a88e22
+      width: 2
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-health
+    type: CHART
+  CHART-tile_complexity_per_1000:
+    children: []
+    id: CHART-tile_complexity_per_1000
+    meta:
+      chartId: 3
+      height: 40
+      sliceName: Complexity per 1,000 lines
+      uuid: 7307a1a3-4b07-5368-8551-d82f2daa7aa4
+      width: 2
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-health
+    type: CHART
+  CHART-tile_test_share:
+    children: []
+    id: CHART-tile_test_share
+    meta:
+      chartId: 4
+      height: 40
+      sliceName: Test share of lines
+      uuid: 736bed10-8c90-570d-93eb-b3cb881a516c
+      width: 2
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-health
+    type: CHART
+  HEADER-size:
+    children: []
+    id: HEADER-size
+    meta:
+      background: BACKGROUND_TRANSPARENT
+      headerSize: MEDIUM_HEADER
+      text: Size and complexity
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    type: HEADER
+  ROW-size:
+    children:
+    - CHART-size_by_area
+    - CHART-complexity_by_area
+    id: ROW-size
+    meta:
+      background: BACKGROUND_TRANSPARENT
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    type: ROW
+  CHART-size_by_area:
+    children: []
+    id: CHART-size_by_area
+    meta:
+      chartId: 5
+      height: 50
+      sliceName: Size by area
+      uuid: 2f972c9c-31eb-5684-954c-5af23f9c5a52
+      width: 6
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-size
+    type: CHART
+  CHART-complexity_by_area:
+    children: []
+    id: CHART-complexity_by_area
+    meta:
+      chartId: 6
+      height: 50
+      sliceName: Complexity by area
+      uuid: b476b941-062a-5b78-b800-3feed1350f88
+      width: 6
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-size
+    type: CHART
+  ROW-complexity:
+    children:
+    - CHART-complexity_per_1000_by_repo
+    - CHART-average_complexity_by_repo
+    - CHART-functions_over_10_by_repo
+    id: ROW-complexity
+    meta:
+      background: BACKGROUND_TRANSPARENT
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    type: ROW
+  CHART-complexity_per_1000_by_repo:
+    children: []
+    id: CHART-complexity_per_1000_by_repo
+    meta:
+      chartId: 7
+      height: 50
+      sliceName: Complexity per 1,000 lines
+      uuid: ebc36263-3ffe-59b5-b004-6e03094b476e
+      width: 4
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-complexity
+    type: CHART
+  CHART-average_complexity_by_repo:
+    children: []
+    id: CHART-average_complexity_by_repo
+    meta:
+      chartId: 8
+      height: 50
+      sliceName: Average complexity per function
+      uuid: 41c92bcd-841d-566f-8079-095a3a66c833
+      width: 4
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-complexity
+    type: CHART
+  CHART-functions_over_10_by_repo:
+    children: []
+    id: CHART-functions_over_10_by_repo
+    meta:
+      chartId: 9
+      height: 50
+      sliceName: Functions over complexity 10
+      uuid: 9a278cb8-6e5b-583c-bb00-364223443bb4
+      width: 4
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-complexity
+    type: CHART
+  HEADER-change:
+    children: []
+    id: HEADER-change
+    meta:
+      background: BACKGROUND_TRANSPARENT
+      headerSize: MEDIUM_HEADER
+      text: Change and functionality
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    type: HEADER
+  ROW-churn:
+    children:
+    - CHART-churn
+    - CHART-churn_by_area
+    id: ROW-churn
+    meta:
+      background: BACKGROUND_TRANSPARENT
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    type: ROW
+  CHART-churn:
+    children: []
+    id: CHART-churn
+    meta:
+      chartId: 10
+      height: 50
+      sliceName: Churn
+      uuid: e136bd78-7b30-5b50-9f5b-9485c3793e48
+      width: 6
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-churn
+    type: CHART
+  CHART-churn_by_area:
+    children: []
+    id: CHART-churn_by_area
+    meta:
+      chartId: 11
+      height: 50
+      sliceName: Churn by area
+      uuid: 99066a4d-4cf4-5fe5-8e4d-22cfe6c701f3
+      width: 6
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-churn
+    type: CHART
+  ROW-functionality:
+    children:
+    - CHART-operations_by_kind
+    - CHART-e2e_scenarios_by_suite
+    id: ROW-functionality
+    meta:
+      background: BACKGROUND_TRANSPARENT
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    type: ROW
+  CHART-operations_by_kind:
+    children: []
+    id: CHART-operations_by_kind
+    meta:
+      chartId: 12
+      height: 50
+      sliceName: Operations
+      uuid: eac496b8-245b-5a18-836e-fe13dd5af5ca
+      width: 6
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-functionality
+    type: CHART
+  CHART-e2e_scenarios_by_suite:
+    children: []
+    id: CHART-e2e_scenarios_by_suite
+    meta:
+      chartId: 13
+      height: 50
+      sliceName: End-to-end scenarios
+      uuid: 38bd390b-1c4c-5cc2-89c7-31a3f7701c76
+      width: 6
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-functionality
+    type: CHART
+  HEADER-iterations:
+    children: []
+    id: HEADER-iterations
+    meta:
+      background: BACKGROUND_TRANSPARENT
+      headerSize: MEDIUM_HEADER
+      text: By iteration
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    type: HEADER
+  ROW-iterations:
+    children:
+    - CHART-lines_by_iteration
+    - CHART-churn_by_iteration
+    id: ROW-iterations
+    meta:
+      background: BACKGROUND_TRANSPARENT
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    type: ROW
+  CHART-lines_by_iteration:
+    children: []
+    id: CHART-lines_by_iteration
+    meta:
+      chartId: 14
+      height: 50
+      sliceName: Lines at the end of each iteration
+      uuid: 15ce72f2-242c-55c6-a9d3-1d8c4d540a64
+      width: 6
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-iterations
+    type: CHART
+  CHART-churn_by_iteration:
+    children: []
+    id: CHART-churn_by_iteration
+    meta:
+      chartId: 15
+      height: 50
+      sliceName: Churn per iteration
+      uuid: d1072bc8-827a-5f0b-acdb-676985017b01
+      width: 6
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-iterations
+    type: CHART
+  HEADER-hotspots:
+    children: []
+    id: HEADER-hotspots
+    meta:
+      background: BACKGROUND_TRANSPARENT
+      headerSize: MEDIUM_HEADER
+      text: Hotspots
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    type: HEADER
+  ROW-hotspots:
+    children:
+    - CHART-hotspots
+    id: ROW-hotspots
+    meta:
+      background: BACKGROUND_TRANSPARENT
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    type: ROW
+  CHART-hotspots:
+    children: []
+    id: CHART-hotspots
+    meta:
+      chartId: 16
+      height: 70
+      sliceName: Hotspots
+      uuid: 1c014444-7a67-5b49-8467-d7231c1d07c2
+      width: 12
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-hotspots
+    type: CHART
+metadata:
+  color_scheme: codeVitals
+  label_colors:
+    v-note: '#2a78d6'
+    bored: '#eb6834'
+    sovereign-config: '#1baf7a'
+    server: '#2a78d6'
+    web: '#eb6834'
+    android: '#1baf7a'
+    backend: '#eda100'
+    shared: '#e87ba4'
+    libraries: '#008300'
+    tests: '#6250d6'
+    tooling: '#e34948'
+    Lines added: '#2a78d6'
+    Lines deleted: '#e34948'
+    lines_added: '#2a78d6'
+    lines_deleted_below_zero: '#e34948'
+  shared_label_colors: []
+  map_label_colors: {}
+  color_scheme_domain:
+  - '#2a78d6'
+  - '#eb6834'
+  - '#1baf7a'
+  - '#eda100'
+  - '#e87ba4'
+  - '#008300'
+  - '#6250d6'
+  - '#e34948'
+  cross_filters_enabled: false
+  native_filter_configuration:
+  - id: NATIVE_FILTER-repo
+    name: Repo
+    filterType: filter_select
+    description: The measured repositories.
+    targets:
+    - column:
+        name: repo
+      datasetUuid: 11cdd17c-a94a-5986-9c81-ff3ecefe7f22
+    controlValues: &id001
+      enableEmptyFilter: false
+      defaultToFirstItem: false
+      multiSelect: true
+      searchAllOptions: false
+      inverseSelection: false
+    defaultDataMask:
+      extraFormData: {}
+      filterState: {}
+      ownState: {}
+    cascadeParentIds: []
+    scope:
+      rootPath:
+      - ROOT_ID
+      excluded: []
+    type: NATIVE_FILTER
+  - id: NATIVE_FILTER-area
+    name: Area
+    filterType: filter_select
+    description: A repo's areas (its versioned area rules); tests is shared.
+    targets:
+    - column:
+        name: area
+      datasetUuid: 11cdd17c-a94a-5986-9c81-ff3ecefe7f22
+    controlValues: *id001
+    defaultDataMask:
+      extraFormData: {}
+      filterState: {}
+      ownState: {}
+    cascadeParentIds:
+    - NATIVE_FILTER-repo
+    scope:
+      rootPath:
+      - ROOT_ID
+      excluded:
+      - 1
+      - 4
+    type: NATIVE_FILTER
+  - id: NATIVE_FILTER-week
+    name: Week
+    filterType: filter_time
+    description: The range of weeks the charts show (a snapshot week is the state at its end).
+    targets:
+    - {}
+    controlValues:
+      enableEmptyFilter: false
+    defaultDataMask:
+      extraFormData: {}
+      filterState: {}
+      ownState: {}
+    cascadeParentIds: []
+    scope:
+      rootPath:
+      - ROOT_ID
+      excluded:
+      - 1
+      - 16
+    type: NATIVE_FILTER
+  - id: NATIVE_FILTER-iteration
+    name: Iteration
+    filterType: filter_select
+    description: Iterations (the minor of the repo's version); numbers are per repo, so pick a repo first.
+    targets:
+    - column:
+        name: iteration
+      datasetUuid: 11cdd17c-a94a-5986-9c81-ff3ecefe7f22
+    controlValues:
+      enableEmptyFilter: false
+      defaultToFirstItem: false
+      multiSelect: true
+      searchAllOptions: false
+      inverseSelection: false
+      sortAscending: false
+    defaultDataMask:
+      extraFormData: {}
+      filterState: {}
+      ownState: {}
+    cascadeParentIds:
+    - NATIVE_FILTER-repo
+    scope:
+      rootPath:
+      - ROOT_ID
+      excluded:
+      - 1
+    type: NATIVE_FILTER
+  - id: NATIVE_FILTER-commit
+    name: Commit
+    filterType: filter_select
+    description: The commit the Hotspots table shows; newest first, and by default the newest one matching
+      Repo, Area and Iteration.
+    targets:
+    - column:
+        name: commit_label
+      datasetUuid: 3c3a40ea-2644-5db4-9a64-cbf3904c9e45
+    controlValues:
+      enableEmptyFilter: true
+      defaultToFirstItem: true
+      multiSelect: false
+      searchAllOptions: false
+      inverseSelection: false
+      sortAscending: false
+    defaultDataMask:
+      extraFormData: {}
+      filterState: {}
+      ownState: {}
+    cascadeParentIds:
+    - NATIVE_FILTER-repo
+    - NATIVE_FILTER-area
+    - NATIVE_FILTER-iteration
+    scope:
+      rootPath:
+      - ROOT_ID
+      excluded:
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+      - 6
+      - 7
+      - 8
+      - 9
+      - 10
+      - 11
+      - 12
+      - 13
+      - 14
+      - 15
+    type: NATIVE_FILTER
+    sortMetric: latest_commit_at
+    requiredFirst: true
+  chart_configuration: {}
+  global_chart_configuration: {}
+  default_filters: '{}'
+  expanded_slices: {}
+  refresh_frequency: 0
+  timed_refresh_immune_slices: []
+version: 1.0.0
+is_managed_externally: true
+external_url: https://github.com/vcheesbrough/code-vitals/blob/main/superset/dashboard/dashboards/code-vitals.yaml

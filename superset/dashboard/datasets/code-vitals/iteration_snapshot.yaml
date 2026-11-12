@@ -1,0 +1,260 @@
+table_name: iteration_snapshot
+main_dttm_col: week
+description: Snapshot measures at the end of each iteration (last value per iteration). Built on current_measurement.
+default_endpoint: null
+offset: 0
+cache_timeout: null
+catalog: null
+schema: public
+sql: "-- Snapshot measures at the end of every iteration: per repo and iteration\n-- (the minor of the\
+  \ repo's version), every value at the iteration's last\n-- measured commit. Iterations are per repo,\
+  \ so compare them within a repo.\nWITH snapshot AS (\n    SELECT * FROM current_measurement WHERE kind\
+  \ = 'snapshot'\n),\niteration_end AS (\n    SELECT DISTINCT ON (repo, iteration) repo, iteration, sha\n\
+  \    FROM snapshot\n    WHERE iteration IS NOT NULL\n    ORDER BY repo, iteration, committed_at DESC,\
+  \ sha DESC\n)\nSELECT s.week, s.repo, s.sha, s.committed_at, s.iteration, s.measure, s.unit, s.area,\
+  \ s.facet,\n       s.value\nFROM iteration_end e\nJOIN snapshot s ON s.repo = e.repo AND s.sha = e.sha\n"
+params: null
+template_params: null
+filter_select_enabled: true
+fetch_values_predicate: null
+extra: null
+normalize_columns: false
+always_filter_main_dttm: false
+uuid: 207e7c63-7d4c-5ab8-ae73-829be8fe59b8
+metrics:
+- metric_name: lines
+  verbose_name: Lines (NLOC)
+  metric_type: null
+  expression: SUM(value) FILTER (WHERE measure = 'nloc')
+  description: 'lizard''s non-comment lines: the prototype''s "lines".'
+  d3format: ',d'
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: code_lines
+  verbose_name: Code lines (tokei)
+  metric_type: null
+  expression: SUM(value) FILTER (WHERE measure = 'lines_of_code')
+  description: tokei's code lines, every language.
+  d3format: ',d'
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: files
+  verbose_name: Files
+  metric_type: null
+  expression: SUM(value) FILTER (WHERE measure = 'files')
+  description: Regular files in the tree (unsplit by area).
+  d3format: ',d'
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: functions
+  verbose_name: Functions
+  metric_type: null
+  expression: SUM(value) FILTER (WHERE measure = 'functions')
+  description: Functions and methods (lizard).
+  d3format: ',d'
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: complexity
+  verbose_name: Complexity
+  metric_type: null
+  expression: SUM(value) FILTER (WHERE measure = 'complexity_total')
+  description: Sum of cyclomatic complexity (lizard).
+  d3format: ',d'
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: functions_over_10
+  verbose_name: Functions over complexity 10
+  metric_type: null
+  expression: SUM(value) FILTER (WHERE measure = 'functions_over_10')
+  description: Functions with cyclomatic complexity over 10.
+  d3format: ',d'
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: max_function_complexity
+  verbose_name: Most complex function
+  metric_type: null
+  expression: MAX(value) FILTER (WHERE measure = 'max_function_complexity')
+  description: The highest cyclomatic complexity of any one function.
+  d3format: ',d'
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: complexity_per_1000_lines
+  verbose_name: Complexity per 1,000 lines
+  metric_type: null
+  expression: 1000.0 * SUM(value) FILTER (WHERE measure = 'complexity_total') / NULLIF(SUM(value) FILTER
+    (WHERE measure = 'nloc'), 0)
+  description: complexity_total / nloc x 1,000 (lizard's lines, as the prototype).
+  d3format: ',.1f'
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: average_complexity
+  verbose_name: Average complexity per function
+  metric_type: null
+  expression: 1.0 * SUM(value) FILTER (WHERE measure = 'complexity_total') / NULLIF(SUM(value) FILTER
+    (WHERE measure = 'functions'), 0)
+  description: complexity_total / functions.
+  d3format: ',.2f'
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: test_share
+  verbose_name: Test share of lines
+  metric_type: null
+  expression: 1.0 * COALESCE(SUM(value) FILTER (WHERE measure = 'nloc' AND area = 'tests'), 0) / NULLIF(SUM(value)
+    FILTER (WHERE measure = 'nloc'), 0)
+  description: Lines (NLOC) in the tests area over all lines.
+  d3format: .1%
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: operations
+  verbose_name: Operations
+  metric_type: null
+  expression: SUM(value) FILTER (WHERE measure = 'operations')
+  description: HTTP routes, gRPC methods and MCP tools.
+  d3format: ',d'
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: e2e_scenarios
+  verbose_name: End-to-end scenarios
+  metric_type: null
+  expression: SUM(value) FILTER (WHERE measure = 'e2e_scenarios')
+  description: Playwright scenarios, Kotlin @Test, Rust integration tests.
+  d3format: ',d'
+  currency: null
+  extra: null
+  warning_text: null
+columns:
+- column_name: week
+  verbose_name: Week
+  is_dttm: true
+  is_active: true
+  type: DATE
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: Monday of the week this row is the end-of-week state of.
+  python_date_format: null
+  extra: null
+- column_name: repo
+  verbose_name: Repo
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: sha
+  verbose_name: Commit SHA
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: committed_at
+  verbose_name: Committed at
+  is_dttm: true
+  is_active: true
+  type: TIMESTAMP WITH TIME ZONE
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: iteration
+  verbose_name: Iteration
+  is_dttm: false
+  is_active: true
+  type: INTEGER
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: measure
+  verbose_name: Measure
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: unit
+  verbose_name: Unit
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: area
+  verbose_name: Area
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: facet
+  verbose_name: Facet
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: value
+  verbose_name: Value
+  is_dttm: false
+  is_active: true
+  type: DOUBLE PRECISION
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+version: 1.0.0
+database_uuid: ed32a742-6c02-5146-b830-8ca6882e8349
+is_managed_externally: true
+external_url: https://github.com/vcheesbrough/code-vitals/blob/main/superset/dashboard/datasets/code-vitals/iteration_snapshot.yaml

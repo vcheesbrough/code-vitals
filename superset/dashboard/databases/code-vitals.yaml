@@ -1,0 +1,13 @@
+database_name: code-vitals
+sqlalchemy_uri: postgresql+psycopg2://code_vitals_reader:XXXXXXXXXX@code-vitals-db:5432/code_vitals
+cache_timeout: null
+expose_in_sqllab: true
+allow_run_async: false
+allow_ctas: false
+allow_cvas: false
+allow_dml: false
+allow_csv_upload: false
+extra:
+  allows_virtual_table_explore: true
+uuid: ed32a742-6c02-5146-b830-8ca6882e8349
+version: 1.0.0

@@ -5,8 +5,10 @@
 # stage. Fake `curl` and `docker` first on PATH: curl answers /health with the
 # body in $WORK_DIR/health and /login/authentik with "<code> <location>" from
 # $WORK_DIR/login; docker's psql succeeds unless the query is listed in
-# $WORK_DIR/denied. The smoke must pass on a healthy stack and fail on each
-# kind of breakage.
+# $WORK_DIR/denied, answers the dashboard's chart count from
+# $WORK_DIR/dashboard-charts, and the dataset check prints and exits as
+# $WORK_DIR/check and $WORK_DIR/check-status say. The smoke must pass on a
+# healthy stack and fail on each kind of breakage.
 
 set -eu
 
@@ -33,9 +35,16 @@ echo "\$* PGPASSWORD=\${PGPASSWORD:-}" >> "$WORK_DIR/docker-calls"
 for last; do :; done
 grep -qxF "\$last" "$WORK_DIR/denied" && { echo "ERROR:  permission denied for table repo" >&2; exit 1; }
 grep -qxF "\$last" "$WORK_DIR/missing" 2>/dev/null && { echo "ERROR:  relation \"repo\" does not exist" >&2; exit 1; }
+case "\$*" in
+  *dashboard_slices*) cat "$WORK_DIR/dashboard-charts"; exit 0 ;;
+  *"code_vitals_dashboard --check"*) cat "$WORK_DIR/check"; exit "\$(cat "$WORK_DIR/check-status")" ;;
+esac
 echo 3
 EOF
 chmod +x "$WORK_DIR/bin/curl" "$WORK_DIR/bin/docker"
+
+# The bundle's chart count, as the smoke counts it.
+CHARTS=$(find "$SCRIPT_DIR/../superset/dashboard/charts" -name '*.yaml' | wc -l | tr -d ' ')
 
 GOOD_LOGIN="302 https://auth.desync.link/application/o/authorize/?response_type=code&client_id=code-vitals-dev&redirect_uri=https%3A%2F%2Fcode-vitals-dev.desync.link%2Foauth-authorized%2Fauthentik&scope=openid+email+profile&state=x"
 
@@ -55,6 +64,9 @@ setup() {
     : > "$WORK_DIR/denied"
     for q in "$@"; do echo "$q" >> "$WORK_DIR/denied"; done
     : > "$WORK_DIR/docker-calls"
+    echo "$CHARTS" > "$WORK_DIR/dashboard-charts"
+    echo "dashboard datasets read: freshness 3" > "$WORK_DIR/check"
+    echo 0 > "$WORK_DIR/check-status"
 }
 
 run() {
@@ -113,6 +125,28 @@ setup OK "$GOOD_LOGIN"
 echo "SELECT 1 FROM repo LIMIT 1" > "$WORK_DIR/missing"
 if run; then fail "missing table: expected failure"; elif grep -q "not with a permission denial" "$WORK_DIR/out"; then pass "a base-table error other than a permission denial fails"; else fail "missing table: $(cat "$WORK_DIR/out")"; fi
 rm -f "$WORK_DIR/missing"
+
+setup OK "$GOOD_LOGIN" "SELECT 1 FROM repo LIMIT 1"
+if run && grep -q "ok: $CHARTS charts; dashboard datasets read: freshness 3" "$WORK_DIR/out" \
+    && grep -q "^exec code-vitals-dev-superset-1 python -m code_vitals_dashboard --check /app/code-vitals-dashboard" "$WORK_DIR/docker-calls" \
+    && grep -q "^exec code-vitals-dev-postgres-1 psql .* -U code_vitals -d superset .* PGPASSWORD=$" "$WORK_DIR/docker-calls"; then
+    pass "the dashboard check counts charts in superset's database and reads datasets in its container"
+else
+    fail "dashboard check: $(cat "$WORK_DIR/out") $(cat "$WORK_DIR/docker-calls")"
+fi
+
+setup OK "$GOOD_LOGIN" "SELECT 1 FROM repo LIMIT 1"
+echo 0 > "$WORK_DIR/dashboard-charts"
+if run; then fail "no dashboard: expected failure"; elif grep -q "dashboard has 0 chart(s), the bundle $CHARTS" "$WORK_DIR/out"; then pass "a missing dashboard fails"; else fail "no dashboard: $(cat "$WORK_DIR/out")"; fi
+
+setup OK "$GOOD_LOGIN" "SELECT 1 FROM repo LIMIT 1"
+echo $((CHARTS - 1)) > "$WORK_DIR/dashboard-charts"
+if run; then fail "chart missing: expected failure"; elif grep -q "the bundle $CHARTS" "$WORK_DIR/out"; then pass "a dashboard missing a chart fails"; else fail "chart missing: $(cat "$WORK_DIR/out")"; fi
+
+setup OK "$GOOD_LOGIN" "SELECT 1 FROM repo LIMIT 1"
+echo "permission denied for view current_measurement" > "$WORK_DIR/check"
+echo 1 > "$WORK_DIR/check-status"
+if run; then fail "unreadable dataset: expected failure"; elif grep -q "cannot be read through Superset's connection" "$WORK_DIR/out" && grep -q "permission denied for view" "$WORK_DIR/out"; then pass "a dataset Superset cannot read fails, with its error"; else fail "unreadable dataset: $(cat "$WORK_DIR/out")"; fi
 
 if PATH="$WORK_DIR/bin:$PATH" sh "$UNDER_TEST" staging > /dev/null 2>&1; then fail "unknown env: expected refusal"; else pass "unknown environment refused"; fi
 

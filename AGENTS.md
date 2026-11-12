@@ -117,9 +117,12 @@ Two environments on mini, each its own compose project of `deploy/compose.yaml`:
   and published by the push pipeline beside the collector under the same
   version. Sign-in is OIDC through Authentik (`authentik/` blueprints, applied
   on deploy); group membership is managed by hand in Authentik. Each deploy
-  runs `superset db upgrade`, `init` and `set-database-uri` in a one-off
-  container (`superset/bootstrap.sh`), then smoke-checks health, the sign-in
-  redirect and the reader role (`scripts/smoke-superset.sh`) before tagging.
+  runs `superset db upgrade`, `init`, `set-database-uri` and the dashboard
+  import (`superset/dashboard/`, card #500) in a one-off container
+  (`superset/bootstrap.sh`), then smoke-checks health, the sign-in redirect,
+  the reader role and the dashboard (`scripts/smoke-superset.sh`) before
+  tagging. **The dashboard is code**: each deploy overwrites it from the
+  bundle, so change it in `superset/dashboard/`, never only in Superset.
 - `DEPLOY_PULL=missing ./scripts/deploy-stack.sh <env> <collector> <superset>`
   (with the six secrets and a `proxy-backend` network) runs a stack on a local
   docker for trying changes; never point it at mini by hand.

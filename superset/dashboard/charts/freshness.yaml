@@ -1,0 +1,41 @@
+slice_name: Freshness
+description: 'Per repo, the newest commit the collector recorded and how old it is, and the last collector
+  run. The pipeline''s health check: a repo whose age keeps growing while it has new commits, or whose
+  last run failed, is not being collected.'
+certified_by: null
+certification_details: null
+viz_type: table
+params:
+  viz_type: table
+  query_mode: raw
+  all_columns:
+  - repo
+  - last_recorded_commit
+  - last_recorded_committed_at
+  - age_days
+  - last_run_finished_at
+  - last_run_outcome
+  order_by_cols:
+  - '["repo", true]'
+  adhoc_filters: []
+  groupby: []
+  metrics: []
+  percent_metrics: []
+  row_limit: 100
+  server_pagination: false
+  server_page_length: 10
+  show_cell_bars: false
+  color_pn: false
+  table_timestamp_format: '%Y-%m-%d %H:%M'
+  include_search: false
+  column_config:
+    age_days:
+      d3NumberFormat: ',.1f'
+  extra_form_data: {}
+query_context: null
+cache_timeout: null
+uuid: 72f0dd2a-3bcf-5b22-af73-ad4d4fbc27d0
+version: 1.0.0
+dataset_uuid: 927b28fb-f2d1-5aa7-9488-75c8a81eaeee
+is_managed_externally: true
+external_url: https://github.com/vcheesbrough/code-vitals/blob/main/superset/dashboard/charts/freshness.yaml

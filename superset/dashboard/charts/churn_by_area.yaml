@@ -1,0 +1,72 @@
+slice_name: Churn by area
+description: Lines added plus deleted by each week's commits, by area.
+certified_by: null
+certification_details: null
+viz_type: echarts_timeseries_bar
+params:
+  viz_type: echarts_timeseries_bar
+  time_grain_sqla: P1W
+  x_axis_sort_asc: true
+  x_axis_sort_series: name
+  x_axis_sort_series_ascending: true
+  x_axis_time_format: smart_date
+  rich_tooltip: true
+  tooltipTimeFormat: smart_date
+  show_legend: true
+  legendType: scroll
+  legendOrientation: top
+  row_limit: 10000
+  truncate_metric: true
+  show_empty_columns: true
+  comparison_type: values
+  annotation_layers: []
+  forecastEnabled: false
+  markerEnabled: false
+  zoomable: false
+  truncateXAxis: true
+  y_axis_bounds:
+  - null
+  - null
+  y_axis_title_margin: 15
+  x_axis_title_margin: 15
+  y_axis_title_position: Left
+  color_scheme: codeVitals
+  extra_form_data: {}
+  x_axis: week
+  metrics:
+  - churn
+  groupby:
+  - area
+  adhoc_filters:
+  - clause: WHERE
+    expressionType: SIMPLE
+    subject: week
+    operator: TEMPORAL_RANGE
+    comparator: No filter
+    isExtra: false
+    isNew: false
+    sqlExpression: null
+    filterOptionName: filter_week_temporal_range
+  - clause: WHERE
+    expressionType: SIMPLE
+    subject: measure
+    operator: IN
+    comparator:
+    - lines_added
+    - lines_deleted
+    isExtra: false
+    isNew: false
+    sqlExpression: null
+    filterOptionName: filter_measure_in
+  y_axis_format: SMART_NUMBER
+  stack: Stack
+  orientation: vertical
+  show_value: false
+  only_total: true
+query_context: null
+cache_timeout: null
+uuid: 99066a4d-4cf4-5fe5-8e4d-22cfe6c701f3
+version: 1.0.0
+dataset_uuid: bac94bf7-45a3-5c17-8db4-5e0bdb595362
+is_managed_externally: true
+external_url: https://github.com/vcheesbrough/code-vitals/blob/main/superset/dashboard/charts/churn_by_area.yaml

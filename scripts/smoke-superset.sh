@@ -10,7 +10,10 @@
 #      the request before asking anyone to sign in). Sign-in is wired, without
 #      needing a user;
 #   3. the reader role — Superset's datasource — can read the freshness view
-#      and is refused on a base table.
+#      and is refused on a base table;
+#   4. the dashboard (superset/dashboard/, card #500) is imported with every
+#      chart of the bundle, and every one of its datasets reads through
+#      Superset's own `code-vitals` connection, in the running container.
 #
 # Usage: smoke-superset.sh <dev|prod>
 # Environment: CODE_VITALS_READER_PASSWORD (never printed). Needs curl and docker.
@@ -30,6 +33,8 @@ esac
 : "${CODE_VITALS_READER_PASSWORD:?CODE_VITALS_READER_PASSWORD is required}"
 host="$base.desync.link"
 container="$base-postgres-1"
+superset="$base-superset-1"
+charts_dir="$(dirname "$0")/../superset/dashboard/charts"
 attempts="${SMOKE_ATTEMPTS:-36}"
 delay="${SMOKE_DELAY:-5}"
 
@@ -114,5 +119,22 @@ case "$denied" in
     exit 1
     ;;
 esac
+unset PGPASSWORD
 echo "  ok"
+
+echo "==> the dashboard is imported and its datasets read"
+expected=$(find "$charts_dir" -name '*.yaml' | wc -l | tr -d ' ')
+# Superset's metadata database, as the owner over the container's socket.
+charts=$(docker exec "$container" psql -v ON_ERROR_STOP=1 -U code_vitals -d superset -tA -c \
+  "SELECT count(*) FROM dashboard_slices s JOIN dashboards d ON d.id = s.dashboard_id WHERE d.slug = 'code-vitals'")
+if [ "$expected" -eq 0 ] || [ "$charts" != "$expected" ]; then
+  echo "ERROR: the code-vitals dashboard has ${charts:-no} chart(s), the bundle $expected" >&2
+  exit 1
+fi
+if ! read_out=$(docker exec "$superset" python -m code_vitals_dashboard --check /app/code-vitals-dashboard 2>&1); then
+  echo "$read_out" >&2
+  echo "ERROR: the dashboard's datasets cannot be read through Superset's connection" >&2
+  exit 1
+fi
+echo "  ok: $charts charts; $(echo "$read_out" | tail -n 1)"
 echo "==> $env: superset smoke checks passed"

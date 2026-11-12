@@ -1,0 +1,42 @@
+slice_name: Hotspots
+description: The most complex functions at the commit chosen in the dashboard's Commit filter (by default
+  the newest commit matching the other filters).
+certified_by: null
+certification_details: null
+viz_type: table
+params:
+  viz_type: table
+  query_mode: raw
+  all_columns:
+  - repo
+  - area
+  - file
+  - function
+  - start_line
+  - ccn
+  - nloc
+  - params
+  order_by_cols:
+  - '["ccn", false]'
+  - '["nloc", false]'
+  adhoc_filters: []
+  groupby: []
+  metrics: []
+  percent_metrics: []
+  row_limit: 25
+  server_pagination: false
+  server_page_length: 10
+  show_cell_bars: false
+  color_pn: false
+  include_search: true
+  column_config:
+    ccn:
+      showCellBars: true
+  extra_form_data: {}
+query_context: null
+cache_timeout: null
+uuid: 1c014444-7a67-5b49-8467-d7231c1d07c2
+version: 1.0.0
+dataset_uuid: 3c3a40ea-2644-5db4-9a64-cbf3904c9e45
+is_managed_externally: true
+external_url: https://github.com/vcheesbrough/code-vitals/blob/main/superset/dashboard/charts/hotspots.yaml

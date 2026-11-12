@@ -1,0 +1,53 @@
+slice_name: Complexity per 1,000 lines
+description: complexity_total / nloc x 1,000 at the end of the latest week.
+certified_by: null
+certification_details: null
+viz_type: big_number
+params:
+  viz_type: big_number
+  x_axis: week
+  time_grain_sqla: P1W
+  metric: complexity_per_1000_lines
+  adhoc_filters:
+  - clause: WHERE
+    expressionType: SIMPLE
+    subject: week
+    operator: TEMPORAL_RANGE
+    comparator: No filter
+    isExtra: false
+    isNew: false
+    sqlExpression: null
+    filterOptionName: filter_week_temporal_range
+  - clause: WHERE
+    expressionType: SIMPLE
+    subject: measure
+    operator: IN
+    comparator:
+    - nloc
+    - complexity_total
+    isExtra: false
+    isNew: false
+    sqlExpression: null
+    filterOptionName: filter_measure_in
+  show_trend_line: true
+  start_y_axis_at_zero: true
+  compare_lag: 4
+  compare_suffix: vs 4 weeks before
+  header_font_size: 0.4
+  subheader_font_size: 0.15
+  y_axis_format: ',.1f'
+  time_format: smart_date
+  color_picker:
+    r: 42
+    g: 120
+    b: 214
+    a: 1
+  rolling_type: None
+  extra_form_data: {}
+query_context: null
+cache_timeout: null
+uuid: 7307a1a3-4b07-5368-8551-d82f2daa7aa4
+version: 1.0.0
+dataset_uuid: 11cdd17c-a94a-5986-9c81-ff3ecefe7f22
+is_managed_externally: true
+external_url: https://github.com/vcheesbrough/code-vitals/blob/main/superset/dashboard/charts/tile_complexity_per_1000.yaml

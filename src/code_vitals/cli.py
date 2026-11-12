@@ -63,7 +63,13 @@ def build_parser(info: BuildInfo, repos: Mapping[str, RepoConfig]) -> argparse.A
         ),
     )
     collect_parser.add_argument("--repo", required=True, choices=sorted(repos))
-    collect_parser.add_argument("--clone", required=True, type=Path, help="path to a full clone")
+    source = collect_parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--clone", type=Path, help="path to a full clone")
+    source.add_argument(
+        "--fetch",
+        action="store_true",
+        help="clone the repo from its configured URL first (a temporary full clone)",
+    )
     collect_parser.add_argument(
         "--trigger", default=str(obs.Trigger.MANUAL), choices=[str(t) for t in obs.Trigger]
     )
@@ -173,12 +179,13 @@ def _collect(
     info: BuildInfo,
     environ: Mapping[str, str],
 ) -> int:
-    print(f"code-vitals collect: {repo.name} from {args.clone} ({args.trigger})")
+    source = repo.url if args.fetch else args.clone
+    print(f"code-vitals collect: {repo.name} from {source} ({args.trigger})")
     try:
         result = collect(
             conninfo,
             repo,
-            args.clone,
+            args.clone,  # None with --fetch: collect clones the repo's URL
             obs.Trigger(args.trigger),
             info,
             pipeline_number=environ.get(PIPELINE_NUMBER_ENV) or None,

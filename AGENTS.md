@@ -207,12 +207,28 @@ core, not saved for the `1.0.0` card, which is only the sign-off.
   for different repos. The repo is stable and bounded, and runs per repo are
   serialized by an advisory lock.
 
-- **Moving collector tag in other repos.** The code-vitals workflow step in
-  v-note, bored and sovereign-config uses
-  `registry.desync.link/code-vitals-collector:stable` with `pull: true` and
-  `failure: ignore`, not a pinned digest. Approved because the step can never
-  block a build, writes are idempotent, and catch-up refills any missed run —
-  while pinning would need three cross-repo PRs per new measure. The image
-  bakes in its version and revision and records them with every run. **Every
-  other image stays pinned by digest.** Each such step carries a comment
-  pointing here.
+- **Moving collector tag in other repos.** The code-vitals workflow in
+  v-note, bored and sovereign-config runs
+  `registry.desync.link/code-vitals-collector:stable` (`docker create --pull
+  always`, through the socket) in a step with `failure: ignore`, not a pinned
+  digest. Approved because the step can never block a build, writes are
+  idempotent, and catch-up refills any missed run — while pinning would need
+  three cross-repo PRs per new measure. The image bakes in its version and
+  revision and records them with every run, and only a prod deployment whose
+  checks passed moves `:stable`. **Every other image stays pinned by
+  digest** (the step's own `docker` CLI image included). Each such workflow
+  carries a comment pointing here.
+  - The workflow is `deploy/measured-repo-workflow.yml` here, copied with
+    `__REPO__`/`__TRUNK__` replaced to `.woodpecker/code-vitals.yml` in each
+    measured repo (card #498); `tests/test_measured_repo_workflow.py` pins it.
+    It skips Woodpecker's clone: `collect --fetch` clones the public repo
+    inside the container (full history, tags), so the workflow needs no
+    clone override and later changes ship through `:stable` alone.
+  - **Secret:** the measured repo's pipelines see only their own broker layer
+    plus `/woodpecker/shared`, so `code_vitals_prod_writer_password` is a
+    sovereign-config **alias** from this repo's layer into each measured
+    repo's (`/woodpecker/repos/vcheesbrough/<repo>/`) — one value, rotated
+    once. It is the writer, so a measured repo's pipeline could write any
+    repo's rows; the same trust assumption as above (only the owner pushes)
+    covers it. The OTLP settings are not secret and are written in the
+    workflow.

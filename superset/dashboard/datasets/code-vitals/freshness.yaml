@@ -1,0 +1,120 @@
+table_name: freshness
+main_dttm_col: null
+description: 'Per repo: the newest commit with a recorded value, its age, and the last collector run.
+  The pipeline''s health signal.'
+default_endpoint: null
+offset: 0
+cache_timeout: null
+catalog: null
+schema: public
+sql: null
+params: null
+template_params: null
+filter_select_enabled: true
+fetch_values_predicate: null
+extra: null
+normalize_columns: false
+always_filter_main_dttm: false
+uuid: 927b28fb-f2d1-5aa7-9488-75c8a81eaeee
+metrics: []
+columns:
+- column_name: repo
+  verbose_name: Repo
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: last_recorded_sha
+  verbose_name: Last recorded SHA
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: last_recorded_committed_at
+  verbose_name: Last recorded commit at
+  is_dttm: false
+  is_active: true
+  type: TIMESTAMP WITH TIME ZONE
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: last_run_started_at
+  verbose_name: Last run started
+  is_dttm: false
+  is_active: true
+  type: TIMESTAMP WITH TIME ZONE
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: last_run_finished_at
+  verbose_name: Last run finished
+  is_dttm: false
+  is_active: true
+  type: TIMESTAMP WITH TIME ZONE
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: last_run_outcome
+  verbose_name: Last run outcome
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: last_recorded_commit
+  verbose_name: Last recorded commit
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: left(last_recorded_sha, 10)
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: age_days
+  verbose_name: Age (days)
+  is_dttm: false
+  is_active: true
+  type: DOUBLE PRECISION
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: EXTRACT(EPOCH FROM last_recorded_age) / 86400.0
+  description: Days since the newest recorded commit was committed.
+  python_date_format: null
+  extra: null
+version: 1.0.0
+database_uuid: ed32a742-6c02-5146-b830-8ca6882e8349
+is_managed_externally: true
+external_url: https://github.com/vcheesbrough/code-vitals/blob/main/superset/dashboard/datasets/code-vitals/freshness.yaml

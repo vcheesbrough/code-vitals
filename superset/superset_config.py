@@ -52,6 +52,31 @@ PERMANENT_SESSION_LIFETIME = timedelta(hours=12)
 CACHE_CONFIG = {"CACHE_TYPE": "SimpleCache", "CACHE_DEFAULT_TIMEOUT": 300}
 DATA_CACHE_CONFIG = CACHE_CONFIG
 
+# --- the dashboard's colours (card #500) --------------------------------------
+
+# The dataviz skill's validated categorical palette, in its fixed order (CVD
+# separation depends on the order). superset/dashboard/ pins each repo, area
+# and churn series to one of these slots, so colour follows the entity.
+CODE_VITALS_COLORS = [
+    "#2a78d6",  # blue
+    "#eb6834",  # orange
+    "#1baf7a",  # aqua
+    "#eda100",  # yellow
+    "#e87ba4",  # magenta
+    "#008300",  # green
+    "#6250d6",  # violet
+    "#e34948",  # red
+]
+EXTRA_CATEGORICAL_COLOR_SCHEMES = [
+    {
+        "id": "codeVitals",
+        "description": "code-vitals: the dataviz reference palette, fixed order",
+        "label": "code-vitals",
+        "isDefault": True,
+        "colors": CODE_VITALS_COLORS,
+    }
+]
+
 # --- sign-in: OpenID Connect through Authentik -------------------------------
 
 AUTH_TYPE = AUTH_OAUTH

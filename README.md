@@ -155,6 +155,34 @@ code-vitals only as `code_vitals_reader`. The image (`superset/Dockerfile`) is
 Apache Superset 6.1.0 plus the Postgres driver, authlib and
 `superset/superset_config.py`.
 
+The **code-vitals dashboard** (`/superset/dashboard/code-vitals/`) is code:
+`superset/dashboard/` is Superset's import/export bundle (an export zip,
+unzipped — `metadata.yaml`, `databases/`, `datasets/`, `charts/`,
+`dashboards/`), and every deploy imports it over whatever is there
+(`superset/code_vitals_dashboard.py`), so a deleted or edited dashboard comes
+back on the next deploy. To change it, edit the YAML (or build a copy in
+Superset, export it and bring the YAML back) — never the `sqlalchemy_uri` in
+`databases/code-vitals.yaml`, which stays masked: the deploy never imports the
+database file, and the connection's URI is set by `set-database-uri`. The
+datasets read only the reader's views; `tests/test_superset_dashboard.py`
+checks that, the references, the filters and the colours.
+
+| Dataset | What |
+| --- | --- |
+| `weekly_snapshot` | snapshot measures at the end of every week: each repo's last measured commit on or before it, carried forward through weeks without commits |
+| `iteration_snapshot` | snapshot measures at each iteration's last commit |
+| `current_measurement` | the view, for flow measures (churn), summed per period |
+| `hotspots` | `current_function_complexity` plus the week and a commit label |
+| `freshness` | the view: each repo's newest recorded commit, its age and the last run |
+
+Ratios are Superset metrics (complexity per 1,000 lines, average complexity
+per function, test share of lines). Filters: Repo, Area, Week (a time range)
+and Iteration apply to every chart whose dataset has the column; Commit picks
+the moment of the Hotspots table (newest first). The **Freshness** table, one
+row per repo, is the pipeline's health check (no alerts, by decision). Colours
+come from the dataviz reference palette (`codeVitals` in
+`superset_config.py`), one fixed slot per repo and per area.
+
 ## Deploying
 
 A Woodpecker *Deploy* of a commit, with target `dev` (any branch) or `prod`

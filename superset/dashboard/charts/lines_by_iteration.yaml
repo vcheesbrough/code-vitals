@@ -1,0 +1,80 @@
+slice_name: Lines at the end of each iteration
+description: Lines (lizard NLOC) at each iteration's last commit, per repo. Iteration numbers are per
+  repo.
+certified_by: null
+certification_details: null
+viz_type: echarts_timeseries_line
+params:
+  viz_type: echarts_timeseries_line
+  x_axis_sort_asc: true
+  x_axis_sort_series: name
+  x_axis_sort_series_ascending: true
+  x_axis_time_format: smart_date
+  rich_tooltip: true
+  tooltipTimeFormat: smart_date
+  show_legend: true
+  legendType: scroll
+  legendOrientation: top
+  row_limit: 10000
+  truncate_metric: true
+  show_empty_columns: true
+  comparison_type: values
+  annotation_layers: []
+  forecastEnabled: false
+  markerEnabled: true
+  zoomable: false
+  truncateXAxis: true
+  y_axis_bounds:
+  - null
+  - null
+  y_axis_title_margin: 15
+  x_axis_title_margin: 15
+  y_axis_title_position: Left
+  color_scheme: codeVitals
+  extra_form_data: {}
+  seriesType: line
+  markerSize: 6
+  x_axis: iteration
+  xAxisForceCategorical: true
+  x_axis_sort: iteration
+  metrics:
+  - lines
+  groupby:
+  - repo
+  adhoc_filters:
+  - clause: WHERE
+    expressionType: SIMPLE
+    subject: week
+    operator: TEMPORAL_RANGE
+    comparator: No filter
+    isExtra: false
+    isNew: false
+    sqlExpression: null
+    filterOptionName: filter_week_temporal_range
+  - clause: WHERE
+    expressionType: SIMPLE
+    subject: iteration
+    operator: IS NOT NULL
+    comparator: null
+    isExtra: false
+    isNew: false
+    sqlExpression: null
+    filterOptionName: filter_iteration_is not null
+  - clause: WHERE
+    expressionType: SIMPLE
+    subject: measure
+    operator: IN
+    comparator:
+    - nloc
+    isExtra: false
+    isNew: false
+    sqlExpression: null
+    filterOptionName: filter_measure_in
+  y_axis_format: SMART_NUMBER
+query_context: null
+cache_timeout: null
+uuid: 15ce72f2-242c-55c6-a9d3-1d8c4d540a64
+version: 1.0.0
+dataset_uuid: 207e7c63-7d4c-5ab8-ae73-829be8fe59b8
+is_managed_externally: true
+external_url: https://github.com/vcheesbrough/code-vitals/blob/main/superset/dashboard/charts/lines_by_iteration.yaml

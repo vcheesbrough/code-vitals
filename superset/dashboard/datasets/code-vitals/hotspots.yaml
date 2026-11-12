@@ -1,0 +1,202 @@
+table_name: hotspots
+main_dttm_col: committed_at
+description: Per-function complexity (lizard) at every commit, from current_function_complexity.
+default_endpoint: null
+offset: 0
+cache_timeout: null
+catalog: null
+schema: public
+sql: "-- Per-function complexity at every commit, with the week and a readable\n-- commit label for the\
+  \ dashboard's Commit filter.\nSELECT\n    f.repo,\n    f.sha,\n    f.committed_at,\n    (date_trunc('week',\
+  \ f.committed_at))::date AS week,\n    f.iteration,\n    f.area,\n    f.file,\n    f.function,\n   \
+  \ f.start_line,\n    f.ccn,\n    f.nloc,\n    f.params,\n    f.repo || ' · ' || to_char(f.committed_at,\
+  \ 'YYYY-MM-DD HH24:MI') || ' · ' || left(f.sha, 8)\n        || coalesce(' · iteration ' || f.iteration,\
+  \ '') AS commit_label\nFROM current_function_complexity f\n"
+params: null
+template_params: null
+filter_select_enabled: true
+fetch_values_predicate: null
+extra: null
+normalize_columns: false
+always_filter_main_dttm: false
+uuid: 3c3a40ea-2644-5db4-9a64-cbf3904c9e45
+metrics:
+- metric_name: latest_commit_at
+  verbose_name: Latest commit
+  metric_type: null
+  expression: MAX(committed_at)
+  description: Sorts the Commit filter newest first.
+  d3format: null
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: max_ccn
+  verbose_name: Highest complexity
+  metric_type: null
+  expression: MAX(ccn)
+  description: The highest cyclomatic complexity.
+  d3format: ',d'
+  currency: null
+  extra: null
+  warning_text: null
+columns:
+- column_name: repo
+  verbose_name: Repo
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: sha
+  verbose_name: Commit SHA
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: committed_at
+  verbose_name: Committed at
+  is_dttm: true
+  is_active: true
+  type: TIMESTAMP WITH TIME ZONE
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: week
+  verbose_name: Week
+  is_dttm: true
+  is_active: true
+  type: DATE
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: iteration
+  verbose_name: Iteration
+  is_dttm: false
+  is_active: true
+  type: INTEGER
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: area
+  verbose_name: Area
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: file
+  verbose_name: File
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: function
+  verbose_name: Function
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: start_line
+  verbose_name: Line
+  is_dttm: false
+  is_active: true
+  type: INTEGER
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: ccn
+  verbose_name: Complexity
+  is_dttm: false
+  is_active: true
+  type: INTEGER
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: nloc
+  verbose_name: Lines (NLOC)
+  is_dttm: false
+  is_active: true
+  type: INTEGER
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: params
+  verbose_name: Parameters
+  is_dttm: false
+  is_active: true
+  type: INTEGER
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: commit_label
+  verbose_name: Commit
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+version: 1.0.0
+database_uuid: ed32a742-6c02-5146-b830-8ca6882e8349
+is_managed_externally: true
+external_url: https://github.com/vcheesbrough/code-vitals/blob/main/superset/dashboard/datasets/code-vitals/hotspots.yaml

@@ -1,0 +1,277 @@
+table_name: current_measurement
+main_dttm_col: committed_at
+description: Every value of a current measure version at every commit (the view). Used for the flow measures,
+  summed per period.
+default_endpoint: null
+offset: 0
+cache_timeout: null
+catalog: null
+schema: public
+sql: null
+params: null
+template_params: null
+filter_select_enabled: true
+fetch_values_predicate: null
+extra: null
+normalize_columns: false
+always_filter_main_dttm: false
+uuid: bac94bf7-45a3-5c17-8db4-5e0bdb595362
+metrics:
+- metric_name: lines_added
+  verbose_name: Lines added
+  metric_type: null
+  expression: SUM(value) FILTER (WHERE measure = 'lines_added')
+  description: 'Lines added by the commits (flow: summed per period).'
+  d3format: ',d'
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: lines_deleted_below_zero
+  verbose_name: Lines deleted
+  metric_type: null
+  expression: -SUM(value) FILTER (WHERE measure = 'lines_deleted')
+  description: 'Lines deleted by the commits, negated so a chart draws them below zero (flow: summed per
+    period).'
+  d3format: ',d'
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: churn
+  verbose_name: Churn (lines added + deleted)
+  metric_type: null
+  expression: SUM(value) FILTER (WHERE measure IN ('lines_added', 'lines_deleted'))
+  description: 'Lines added plus lines deleted (flow: summed per period).'
+  d3format: ',d'
+  currency: null
+  extra: null
+  warning_text: null
+- metric_name: files_changed
+  verbose_name: Files changed
+  metric_type: null
+  expression: SUM(value) FILTER (WHERE measure = 'files_changed')
+  description: 'Files the commits changed (flow: summed per period).'
+  d3format: ',d'
+  currency: null
+  extra: null
+  warning_text: null
+columns:
+- column_name: repo
+  verbose_name: Repo
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: sha
+  verbose_name: Commit SHA
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: committed_at
+  verbose_name: Committed at
+  is_dttm: true
+  is_active: true
+  type: TIMESTAMP WITH TIME ZONE
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: day
+  verbose_name: Day
+  is_dttm: true
+  is_active: true
+  type: DATE
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: week
+  verbose_name: Week
+  is_dttm: true
+  is_active: true
+  type: DATE
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: month
+  verbose_name: Month
+  is_dttm: true
+  is_active: true
+  type: DATE
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: iteration
+  verbose_name: Iteration
+  is_dttm: false
+  is_active: true
+  type: INTEGER
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: pr_number
+  verbose_name: PR
+  is_dttm: false
+  is_active: true
+  type: INTEGER
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: subject
+  verbose_name: Subject
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: measure
+  verbose_name: Measure
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: measure_version
+  verbose_name: Measure version
+  is_dttm: false
+  is_active: true
+  type: INTEGER
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: unit
+  verbose_name: Unit
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: kind
+  verbose_name: Kind
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: area
+  verbose_name: Area
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: facet
+  verbose_name: Facet
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: value
+  verbose_name: Value
+  is_dttm: false
+  is_active: true
+  type: DOUBLE PRECISION
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: measure_recomputable
+  verbose_name: Recomputable
+  is_dttm: false
+  is_active: true
+  type: BOOLEAN
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+- column_name: measure_released_at
+  verbose_name: Measure released at
+  is_dttm: true
+  is_active: true
+  type: TIMESTAMP WITH TIME ZONE
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: null
+  python_date_format: null
+  extra: null
+version: 1.0.0
+database_uuid: ed32a742-6c02-5146-b830-8ca6882e8349
+is_managed_externally: true
+external_url: https://github.com/vcheesbrough/code-vitals/blob/main/superset/dashboard/datasets/code-vitals/current_measurement.yaml

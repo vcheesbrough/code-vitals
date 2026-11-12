@@ -6,7 +6,8 @@
 #   - superset_config loads with CODE_VITALS_ENV=dev and dummy secrets, mapping
 #     the dev groups to Alpha/Admin and using our security manager;
 #   - the private FAB helper the sign-in relies on still exists;
-#   - it refuses to load when a required variable is missing.
+#   - it refuses to load when a required variable is missing;
+#   - the dashboard bundle and its importer are there (card #500).
 #
 # Usage: check-superset-image.sh <image-ref>
 set -eu
@@ -26,6 +27,7 @@ app = c.OAUTH_PROVIDERS[0]["remote_app"]
 assert app["client_id"] == "code-vitals-dev"
 assert app["client_kwargs"]["code_challenge_method"] == "S256"
 assert c.CUSTOM_SECURITY_MANAGER.__name__ == "CodeVitalsSecurityManager"
+assert [s["id"] for s in c.EXTRA_CATEGORICAL_COLOR_SCHEMES] == ["codeVitals"]  # the dashboard colours
 assert c.DB_HOST == "db.example" and "@db.example:5432/superset" in c.SQLALCHEMY_DATABASE_URI
 # Sign-in relies on this private Flask-AppBuilder helper (signature check).
 assert callable(getattr(c.CUSTOM_SECURITY_MANAGER, "_get_authentik_token_info", None)), "FAB _get_authentik_token_info is gone"
@@ -38,4 +40,27 @@ if docker run --rm --entrypoint python -e CODE_VITALS_ENV=dev "$IMAGE" -c 'impor
   exit 1
 fi
 echo "  refuses to load without its secrets"
+
+# The dashboard as code (card #500): the bundle and its importer are in the
+# image, and the Superset internals the importer calls still take
+# `ignore_permissions` (it imports as no user). Their modules need a running
+# app to import, so their source is read instead.
+out=$(docker run --rm --entrypoint python "$IMAGE" -c '
+import importlib.util, pathlib, re
+import code_vitals_dashboard as d
+contents = d.read_bundle(pathlib.Path("/app/code-vitals-dashboard"))
+for kind in ("charts", "datasets", "dashboards"):
+    assert any(n.startswith(kind + "/") for n in contents), kind
+package = pathlib.Path(importlib.util.find_spec("superset").submodule_search_locations[0])
+for kind, function in [
+    ("dataset", "import_dataset"),
+    ("chart", "import_chart"),
+    ("dashboard", "import_dashboard"),
+]:
+    source = (package / "commands" / kind / "importers" / "v1" / "utils.py").read_text()
+    signature = re.search(r"def " + function + r"\((.*?)\)\s*->", source, re.S)
+    assert signature and "ignore_permissions" in signature[1], function
+print(f"dashboard bundle ok ({len(contents)} files)")
+' 2>&1) || { echo "$out" >&2; echo "ERROR: the dashboard bundle or its importer is broken" >&2; exit 1; }
+echo "  $out"
 echo "==> OK"

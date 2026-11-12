@@ -3,7 +3,10 @@
 # every deploy (scripts/deploy-stack.sh). Each step is idempotent:
 #   1. migrate Superset's metadata database;
 #   2. create/refresh Superset's built-in roles and permissions;
-#   3. point the `code-vitals` database connection at the reader role.
+#   3. point the `code-vitals` database connection at the reader role;
+#   4. import the dashboard (superset/dashboard/, card #500), overwriting its
+#      datasets, charts and dashboard — after step 3, which owns the
+#      connection: the import never touches its URI (superset/code_vitals_dashboard.py).
 #
 # CODE_VITALS_READER_URI comes from the environment; it holds the reader's
 # password, so it is expanded here inside the container and never appears on
@@ -15,4 +18,5 @@ set -eu
 superset db upgrade
 superset init
 superset set-database-uri --database_name code-vitals --uri "$CODE_VITALS_READER_URI"
+python -m code_vitals_dashboard /app/code-vitals-dashboard
 echo "superset bootstrap complete"

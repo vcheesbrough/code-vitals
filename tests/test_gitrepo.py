@@ -1,8 +1,10 @@
+import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from code_vitals.gitrepo import Clone, GitError
+from code_vitals.gitrepo import Clone, GitError, clone_from
 
 from .gitfixture import make_repo, three_commit_history
 
@@ -101,3 +103,27 @@ def test_extract_tree_ignores_export_attributes(tmp_path: Path) -> None:
 
     assert tree.files == 3
     assert (dest / "hidden.txt").read_text() == "h"
+
+
+def test_clone_from_is_a_full_clone_without_a_working_tree(tmp_path: Path) -> None:
+    source = three_commit_history(tmp_path)
+    clone = clone_from(str(source.path), tmp_path / "fetched")
+    assert clone.resolve_trunk("main") == source.shas[-1]
+    assert [sha for sha, _ in clone.first_parent_history(source.shas[-1])] == source.shas
+    assert clone.tags_by_commit() == {source.shas[1]: ["0.2.9"]}
+    assert not (tmp_path / "fetched" / "pyproject.toml").exists()
+
+
+def test_clone_from_never_waits_on_a_credential_prompt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict[str, str] = {}
+
+    def fake_run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        seen.update(kwargs["env"])
+        return subprocess.CompletedProcess(args, 128, "", "terminal prompts disabled")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(GitError, match="terminal prompts disabled"):
+        clone_from("https://example.invalid/private.git", tmp_path / "x")
+    assert seen["GIT_TERMINAL_PROMPT"] == "0"

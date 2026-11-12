@@ -40,7 +40,11 @@ steps:
     commands:
       - |
         set -eu
-        exec < /dev/null
+        # Woodpecker feeds this script to the shell on stdin: never redirect
+        # or read the shell's own stdin here, or the rest of the script is
+        # silently dropped and the step "succeeds" having done nothing. No
+        # command below reads stdin (login takes the pipe; --attach is
+        # stdout/stderr only).
         echo "$$REGISTRY_PASSWORD" | docker login registry.desync.link -u "$$REGISTRY_USER" --password-stdin
         # Every value reaches the collector by name (-e NAME), so the
         # password is on no command line.

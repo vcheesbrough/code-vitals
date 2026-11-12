@@ -6,6 +6,7 @@ its shell is run against a fake `docker` that records every call.
 """
 
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -55,6 +56,17 @@ def test_every_configured_repo_can_be_fetched(repo: str) -> None:
     assert REPOS[repo].url == f"https://github.com/vcheesbrough/{repo}.git"
 
 
+def test_the_step_never_takes_the_shells_stdin() -> None:
+    # Woodpecker pipes the script into the shell: an `exec <…` drops whatever
+    # the shell has not yet read, and the step exits 0 having done nothing
+    # (v-note pipeline 520). Where the cut falls depends on the shell's read
+    # buffer, so running the script cannot reliably catch it; this does.
+    (step,) = workflow("v-note")["steps"].values()
+    for line in step["commands"][0].splitlines():
+        code = line.split("#", 1)[0]
+        assert not re.match(r"\s*exec\b.*<", code), line
+
+
 def test_the_moving_tag_appears_only_in_the_collector_command() -> None:
     (step,) = workflow("v-note")["steps"].values()
     assert ":stable" not in step["image"]
@@ -90,7 +102,13 @@ def _run_step(tmp_path: Path, repo: str, *, start_exit: int = 0) -> tuple[int, l
         "CODE_VITALS_WRITER_PASSWORD": "writerpw0123",
         "CI_PIPELINE_NUMBER": "77",
     }
-    status = subprocess.run(["sh", "-c", script], env=env, capture_output=True).returncode
+    # As Woodpecker runs it: the script on the shell's stdin, behind more than
+    # a read buffer of other lines (it echoes each command first), so a
+    # command that took the shell's stdin would cut the script short.
+    padding = "".join(f"# woodpecker trace line {i:04d} {'.' * 60}\n" for i in range(300))
+    status = subprocess.run(
+        ["sh"], input=(padding + script).encode(), env=env, capture_output=True
+    ).returncode
     return status, calls.read_text().splitlines(), created_env.read_text().strip()
 
 

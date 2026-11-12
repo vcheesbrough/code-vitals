@@ -185,7 +185,7 @@ def _collect(
         result = collect(
             conninfo,
             repo,
-            None if args.fetch else args.clone,
+            args.clone,  # None with --fetch: collect clones the repo's URL
             obs.Trigger(args.trigger),
             info,
             pipeline_number=environ.get(PIPELINE_NUMBER_ENV) or None,

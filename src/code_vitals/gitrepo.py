@@ -4,6 +4,7 @@ Nothing here writes to the clone (no worktrees, no checkouts), so it can be
 mounted read-only. Every git call runs in its own span.
 """
 
+import os
 import subprocess
 from collections import defaultdict
 from dataclasses import dataclass
@@ -53,6 +54,8 @@ def clone_from(url: str, dest: Path) -> "Clone":
             capture_output=True,
             text=True,
             check=False,
+            # Fail rather than wait on a credential prompt if a repo goes private.
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
         )
     if result.returncode != 0:
         raise GitError(f"git clone of {url} failed: {result.stderr.strip()}")

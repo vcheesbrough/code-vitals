@@ -34,7 +34,14 @@ def _expressions(dataset: dict[str, Any]) -> dict[str, str]:
 
 
 def _source(dataset: dict[str, Any]) -> str:
-    return f"({dataset['sql']}) AS d" if dataset["sql"] else dataset["table_name"]
+    source: str = importer.count_source(dataset["sql"], dataset["table_name"])
+    return source
+
+
+def test_a_count_reads_a_datasets_sql_else_its_table() -> None:
+    assert importer.count_source("SELECT 1", "virtual") == "(SELECT 1) AS d"
+    assert importer.count_source(None, "freshness") == "freshness"
+    assert importer.count_source("", "freshness") == "freshness"
 
 
 def test_a_chart_groups_by_its_x_axis_then_its_groupby() -> None:
@@ -59,6 +66,8 @@ def test_the_limit_is_the_charts_else_the_default_at_most_the_cap() -> None:
     assert importer.row_limit({"row_limit": None}, 50000, 100000) == 50000
     assert importer.row_limit({"row_limit": 0}, 50000, 100000) == 50000
     assert importer.row_limit({"row_limit": 200000}, 50000, 100000) == 100000
+    # Superset reads a limit of 0 as the cap (apply_max_row_limit).
+    assert importer.row_limit({}, 0, 100000) == 100000
 
 
 def test_near_the_limit_is_past_the_headroom() -> None:
@@ -66,6 +75,26 @@ def test_near_the_limit_is_past_the_headroom() -> None:
     assert not importer.near_limit(40000, 50000)
     assert importer.near_limit(40001, 50000)
     assert importer.near_limit(50000, 50000)
+
+
+def test_the_report_names_the_closest_chart() -> None:
+    counts = [("Churn", 311, 10000), ("Operations", 7497, 50000), ("Lines", 311, 50000)]
+    # scripts/test-smoke-superset.sh feeds the smoke this line.
+    assert importer.row_limit_report(counts) == (
+        "chart rows at most 15% of a row limit (Operations 7497 of 50000), fails past 80%"
+    )
+    assert importer.row_limit_report([]) == ""
+
+
+def test_the_report_fails_naming_every_chart_near_its_limit() -> None:
+    counts = [("Churn", 8001, 10000), ("Operations", 7497, 50000), ("Lines", 50000, 50000)]
+    with pytest.raises(RuntimeError) as failure:
+        importer.row_limit_report(counts)
+    message = str(failure.value)
+    assert message.endswith("(rows of limit): Churn 8001 of 10000; Lines 50000 of 50000")
+    assert "Operations" not in message
+    # At the headroom exactly, it passes.
+    assert importer.row_limit_report([("Churn", 8000, 10000)]).startswith("chart rows at most 80%")
 
 
 def test_the_count_groups_by_the_charts_columns_after_its_filters() -> None:

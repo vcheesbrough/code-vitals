@@ -148,6 +148,7 @@ echo "permission denied for view current_measurement" > "$WORK_DIR/check"
 echo 1 > "$WORK_DIR/check-status"
 if run; then fail "unreadable dataset: expected failure"; elif grep -q "the dashboard check failed in Superset's container" "$WORK_DIR/out" && grep -q "permission denied for view" "$WORK_DIR/out"; then pass "a dataset Superset cannot read fails, with its error"; else fail "unreadable dataset: $(cat "$WORK_DIR/out")"; fi
 
+# The check's last line, as tests/test_superset_row_limits.py pins row_limit_report's format.
 setup OK "$GOOD_LOGIN" "SELECT 1 FROM repo LIMIT 1"
 printf '%s\n' "chart rows: Operations 7497 of 50000" \
     "dashboard datasets read: freshness 3; chart rows at most 15% of a row limit (Operations 7497 of 50000), fails past 80%" > "$WORK_DIR/check"

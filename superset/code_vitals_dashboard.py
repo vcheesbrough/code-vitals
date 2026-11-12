@@ -339,7 +339,9 @@ def check_datasets(contents: dict[str, str]) -> dict[str, int]:
 # returns the empty groups of every other measure in its dataset, dropped only
 # after the query (card #549). Past its row limit Superset truncates the
 # result without an error, so `--check` fails once a chart's rows pass this
-# share of its limit: caught on a deploy, before anything is cut off (#552).
+# share of its limit (#552). It runs only on a code-vitals deploy, while the
+# rows grow with every measured repo's trunk pipeline: the headroom must cover
+# the growth between two deploys.
 ROW_LIMIT_HEADROOM = 0.8
 
 
@@ -360,13 +362,38 @@ def grouped_by(params: dict[str, Any]) -> list[str]:
 def row_limit(params: dict[str, Any], default: int, cap: int) -> int:
     """The limit Superset puts on a chart's query: its row_limit, else the
     default (ROW_LIMIT), at most the cap (SQL_MAX_ROW), as Superset's
-    query_object_factory works it out."""
-    return min(cap, int(params.get("row_limit") or default))
+    query_object_factory works it out (a limit of 0 is the cap)."""
+    limit = int(params.get("row_limit") or default)
+    return min(cap, limit) if limit else cap
 
 
 def near_limit(rows: int, limit: int) -> bool:
     """Whether a query of `rows` rows is past ROW_LIMIT_HEADROOM of `limit`."""
     return rows > limit * ROW_LIMIT_HEADROOM
+
+
+def row_limit_report(counts: list[tuple[str, int, int]]) -> str:
+    """Of (chart, rows, limit) for each chart: fails naming every chart
+    near_limit, else reports the one closest to its limit ("" for none)."""
+    near = [(chart, rows, limit) for chart, rows, limit in counts if near_limit(rows, limit)]
+    if near:
+        listed = "; ".join(f"{chart} {rows} of {limit}" for chart, rows, limit in near)
+        raise RuntimeError(
+            f"chart queries past {ROW_LIMIT_HEADROOM:.0%} of their row limit, which Superset "
+            f"truncates without an error (rows of limit): {listed}"
+        )
+    if not counts:
+        return ""
+    chart, rows, limit = max(counts, key=lambda c: c[1] / c[2])
+    return (
+        f"chart rows at most {rows / limit:.0%} of a row limit ({chart} {rows} of {limit}), "
+        f"fails past {ROW_LIMIT_HEADROOM:.0%}"
+    )
+
+
+def count_source(sql: str | None, table_name: str) -> str:
+    """What a count reads a dataset from: its SQL as a subquery, or its table."""
+    return f"({sql}) AS d" if sql else table_name
 
 
 def _column_sql(name: str, expressions: dict[str, str]) -> str:
@@ -401,11 +428,11 @@ def row_count_sql(params: dict[str, Any], source: str, expressions: dict[str, st
     return f"SELECT count(*) AS n FROM (SELECT 1 FROM {source}{condition} GROUP BY {group}) AS g"
 
 
-def check_row_limits(contents: dict[str, str]) -> list[tuple[str, int, int]]:
+def check_row_limits(contents: dict[str, str]) -> tuple[list[tuple[str, int, int]], str]:
     """Count the rows each of the bundle's charts with an x-axis queries,
     through the imported `code-vitals` connection, against the limit Superset
-    puts on that query; returns (chart, rows, limit) for each. Fails if any is
-    near_limit. Needs an app context."""
+    puts on that query; returns (chart, rows, limit) for each and the
+    row_limit_report, which fails if any is near_limit. Needs an app context."""
     import yaml
     from flask import current_app
     from superset.connectors.sqla.models import SqlaTable
@@ -425,17 +452,10 @@ def check_row_limits(contents: dict[str, str]) -> list[tuple[str, int, int]]:
             db.session.query(SqlaTable).filter_by(uuid=uuid.UUID(str(chart["dataset_uuid"]))).one()
         )
         expressions = {c.column_name: c.expression for c in dataset.columns if c.expression}
-        source = f"({dataset.sql}) AS d" if dataset.sql else dataset.table_name
+        source = count_source(dataset.sql, dataset.table_name)
         frame = dataset.database.get_df(row_count_sql(params, source, expressions))
         counts.append((chart["slice_name"], int(frame["n"][0]), row_limit(params, default, cap)))
-    near = [(chart, rows, limit) for chart, rows, limit in counts if near_limit(rows, limit)]
-    if near:
-        listed = "; ".join(f"{chart} {rows} of {limit}" for chart, rows, limit in near)
-        raise RuntimeError(
-            f"chart queries past {ROW_LIMIT_HEADROOM:.0%} of their row limit, which Superset "
-            f"truncates without an error (rows of limit): {listed}"
-        )
-    return counts
+    return counts, row_limit_report(counts)
 
 
 USAGE = "usage: python -m code_vitals_dashboard [--check] <bundle-directory>"
@@ -455,16 +475,12 @@ def main(argv: list[str]) -> int:
     with create_app().app_context():
         if check:
             rows = check_datasets(contents)
-            charts = check_row_limits(contents)
+            charts, report = check_row_limits(contents)
             for chart, count, limit in charts:
                 print(f"chart rows: {chart} {count} of {limit}")
             summary = "dashboard datasets read: " + ", ".join(f"{k} {v}" for k, v in rows.items())
-            if charts:
-                chart, count, limit = max(charts, key=lambda c: c[1] / c[2])
-                summary += (
-                    f"; chart rows at most {count / limit:.0%} of a row limit ({chart} {count} "
-                    f"of {limit}), fails past {ROW_LIMIT_HEADROOM:.0%}"
-                )
+            if report:
+                summary += f"; {report}"
             # The last line is what scripts/smoke-superset.sh reports.
             print(summary)
             return 0

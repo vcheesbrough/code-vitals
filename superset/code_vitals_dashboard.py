@@ -174,8 +174,9 @@ def check_datasets(contents: dict[str, str]) -> dict[str, int]:
     as the reader after the import and every dataset's SQL runs. Needs an app
     context."""
     import yaml
-    from superset import db
     from superset.connectors.sqla.models import SqlaTable
+
+    from superset import db
 
     counts: dict[str, int] = {}
     for name, text in sorted(contents.items()):

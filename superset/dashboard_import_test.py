@@ -10,7 +10,9 @@ the push, not a deploy. It is not shipped in the image.
 The server it is given (CODE_VITALS_TEST_DATABASE_URL, the owner of a
 `code_vitals` database already migrated by the collector, whose reader logs in
 with CODE_VITALS_TEST_READER_PASSWORD) gets Superset's own role and database,
-as scripts/deploy-stack.sh creates them. Then the deploy's bootstrap
+as scripts/deploy-stack.sh creates them, and `code_vitals` a few rows (so the
+datasets and the row-limit guard of `--check`, card #552, count something).
+Then the deploy's bootstrap
 (superset/bootstrap.sh) runs as it does on a deploy, and each test below starts
 from its result: the bundle imported, through `python -m code_vitals_dashboard`.
 
@@ -287,6 +289,36 @@ def test_the_check_reads_every_dataset_through_the_connection() -> None:
     # "dashboard datasets read: <table> <rows>, …", maybe followed by "; …".
     datasets = read.removeprefix("dashboard datasets read: ").split("; ")[0]
     assert sorted(part.split()[0] for part in datasets.split(", ")) == tables, read
+    assert all(int(part.split()[1]) > 0 for part in datasets.split(", ") if "hotspots" not in part)
+    # The row-limit guard (card #552) counted every chart with an x-axis
+    # through the connection, and reported the closest to its limit.
+    grouped = sorted(
+        str(d["slice_name"])
+        for n, d in FILES.items()
+        if n.startswith("charts/") and importer.grouped_by(d["params"])
+    )
+    counted = sorted(
+        line.removeprefix("chart rows: ").rsplit(" ", 3)[0]
+        for line in done.stdout.splitlines()
+        if line.startswith("chart rows: ")
+    )
+    assert grouped and counted == grouped, done.stdout
+    assert "; chart rows at most " in read, read
+
+
+def test_the_check_fails_on_a_chart_near_its_row_limit() -> None:
+    counts, _ = importer.check_row_limits(CONTENTS)
+    chart, rows, _limit = max(counts, key=lambda c: c[1])
+    assert rows > 0, counts
+    # The same chart with its row limit at what it queries: past 80% of it.
+    near = dict(CONTENTS)
+    name = next(n for n in near if n.startswith("charts/") and FILES[n]["slice_name"] == chart)
+    data = yaml.safe_load(near[name])
+    data["params"]["row_limit"] = rows
+    near[name] = _dump(data)
+    done = _command("--check", str(_written(near)))
+    assert done.returncode != 0, "--check passed with a chart at its row limit"
+    assert f"{chart} {rows} of {rows}" in done.stderr, done.stderr
 
 
 def test_an_existing_connection_is_given_the_bundles_uuid_and_keeps_its_uri() -> None:
@@ -463,6 +495,30 @@ def _setup() -> None:
             "CREATE ROLE superset LOGIN PASSWORD %s", (os.environ["SUPERSET_DB_PASSWORD"],)
         )
         cursor.execute("CREATE DATABASE superset OWNER superset")
+        # One repo, two commits, a snapshot and a flow measure in one area,
+        # as tests/test_superset_datasets.py seeds it.
+        cursor.execute("INSERT INTO repo (id, name, trunk) VALUES (1, 'bored', 'main')")
+        cursor.execute(
+            "INSERT INTO measure (id, name, version, unit, kind, definition, recomputable,"
+            " status) VALUES (1, 'nloc', 1, 'lines', 'snapshot', 'v1', true, 'complete'),"
+            " (2, 'lines_added', 1, 'lines', 'flow', 'v1', true, 'complete')"
+        )
+        cursor.execute(
+            "INSERT INTO area_ruleset (id, repo_id, version, rules, status)"
+            " VALUES (1, 1, 1, '{}', 'complete')"
+        )
+        cursor.execute("INSERT INTO area (id, ruleset_id, name) VALUES (1, 1, 'server')")
+        for commit_id in (1, 2):
+            cursor.execute(
+                "INSERT INTO commit (id, repo_id, sha, committed_at, author, subject, iteration)"
+                " VALUES (%s, 1, %s, %s, 'a', 's', %s)",
+                (commit_id, f"{commit_id:040x}", f"2026-10-0{commit_id}T01:00Z", commit_id),
+            )
+            cursor.execute(
+                "INSERT INTO measurement (commit_id, measure_id, area_id, facet, value)"
+                " VALUES (%s, 1, 1, '', %s), (%s, 2, 1, '', 7)",
+                (commit_id, 100 * commit_id, commit_id),
+            )
     connection.close()
     started = time.monotonic()
     done = subprocess.run(

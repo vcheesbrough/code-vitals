@@ -41,6 +41,9 @@ Shared skills apply here once the machine is wired up (`start-iteration`,
     `. ./tool-versions.env && ./scripts/with-test-postgres.sh docker build --secret id=database_url,env=CODE_VITALS_TEST_DATABASE_URL --build-arg TOKEI_VERSION="$TOKEI_VERSION" --build-arg RELEASE_TAG=0.1.999 --build-arg GIT_REVISION=local --label org.opencontainers.image.version=0.1.999 --label org.opencontainers.image.revision=local --label org.opencontainers.image.created=now -t code-vitals-collector:local .`
     then `scripts/check-image-metadata.sh code-vitals-collector:local 0.1.999 local` and
     `scripts/check-image-tools.sh code-vitals-collector:local 0.1.999 local`
+  - the Superset image and its dashboard import test (card #548; ~2 min, needs
+    the collector image above to migrate the test database):
+    `docker build -f superset/Dockerfile -t code-vitals-superset:local . && scripts/check-superset-image.sh code-vitals-superset:local && ./scripts/with-test-postgres.sh ./scripts/check-superset-import.sh code-vitals-superset:local code-vitals-collector:local`
 - Extra review criteria beyond the baseline five (correctness, security/OWASP,
   tests, versioning, scope):
   - **Backfillability** — every measure must be computable from git alone at

@@ -1,6 +1,7 @@
-# Push/manual: (compute-version ∥ prune-build-cache) → build (local, no push) → publish-image
+# Push/manual: (compute-version ∥ prune-build-cache) → build (local, no push) → check-superset-import → publish-image
 #   build builds the image and runs every test inside it (the Dockerfile's test stage), then checks its labels and
-#   tools; publish-image pushes to the registry ONLY after that, so the registry holds tested images only.
+#   tools; check-superset-import tests the dashboard import in the Superset image it built; publish-image pushes to
+#   the registry ONLY after both, so the registry holds tested images only.
 #   A push never deploys. Deployments (a later card) promote an image a push already published and never rebuild
 #   (bored card #254).
 #
@@ -91,11 +92,29 @@ steps:
         ./scripts/check-image-metadata.sh "$$SUPERSET" "$$RELEASE_TAG" "$$CI_COMMIT_SHA"
         ./scripts/check-superset-image.sh "$$SUPERSET"
 
-  publish-image:
-    # Push the built + checked image only after build is green, so the registry
-    # never holds an untested image.
+  check-superset-import:
+    # The dashboard import against the real Superset (card #548): the Superset
+    # image just built imports the bundle and its variants on a throwaway
+    # Postgres, migrated by the collector image just built, so a broken import
+    # fails the push instead of a deploy. Same agent and daemon as build, so
+    # both images are here.
     depends_on:
       - build
+    image: *docker-image
+    volumes: *docker-socket
+    commands:
+      - |
+        RELEASE_TAG=$$(cat .release-tag)
+        ./scripts/with-test-postgres.sh ./scripts/check-superset-import.sh \
+          "registry.desync.link/code-vitals-superset:$$RELEASE_TAG" \
+          "registry.desync.link/code-vitals-collector:$$RELEASE_TAG"
+
+  publish-image:
+    # Push the built + checked images only after build and the import test are
+    # green, so the registry never holds an untested image.
+    depends_on:
+      - build
+      - check-superset-import
     image: *docker-image
     volumes: *docker-socket
     environment:

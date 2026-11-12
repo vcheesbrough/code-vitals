@@ -149,6 +149,19 @@ def test_the_superset_image_is_published_before_the_collector() -> None:
     assert superset < collector
 
 
+def test_the_dashboard_import_is_tested_before_anything_is_published() -> None:
+    # Card #548: the import test runs on the images the build just made, and
+    # a failure stops publish-image, so no image with a broken import ships.
+    steps = _workflow("build.yml")["steps"]
+    check = steps["check-superset-import"]
+    assert check["depends_on"] == ["build"]
+    script = "\n".join(check["commands"])
+    assert "./scripts/with-test-postgres.sh ./scripts/check-superset-import.sh" in script
+    assert "code-vitals-superset:$$RELEASE_TAG" in script
+    assert "code-vitals-collector:$$RELEASE_TAG" in script
+    assert sorted(steps["publish-image"]["depends_on"]) == ["build", "check-superset-import"]
+
+
 @pytest.mark.parametrize("name", ["blueprint.yaml", "blueprint-dev.yaml"])
 def test_every_oauth2_provider_allows_the_authorization_code_grant(name: str) -> None:
     # Authentik 2026.x defaults grant_types to an empty list, which refuses

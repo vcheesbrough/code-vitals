@@ -174,7 +174,15 @@ Superset, export it and bring the YAML back) — never the `sqlalchemy_uri` in
 database file, and the connection's URI is set by `set-database-uri`. The
 datasets read only the reader's views; `tests/test_superset_dashboard.py`
 checks that, the references, the filters and the colours, and
-`tests/test_superset_datasets.py` runs the datasets' SQL as the reader.
+`tests/test_superset_datasets.py` runs the datasets' SQL as the reader. The
+import itself is tested against the real Superset in the image before the push
+pipeline publishes it (`superset/dashboard_import_test.py`, run by
+`scripts/check-superset-import.sh`): the connection keeps its URI and gets the
+bundle's UUID, a re-run changes nothing, the dashboard's charts are replaced
+rather than merged, a failing import changes nothing, and what the bundle
+dropped is deleted unless something made in Superset uses it. Locally, after
+building both images:
+`./scripts/with-test-postgres.sh ./scripts/check-superset-import.sh <superset-image> <collector-image>`.
 
 | Dataset | What |
 | --- | --- |

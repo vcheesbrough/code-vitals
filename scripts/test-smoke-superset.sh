@@ -146,7 +146,22 @@ if run; then fail "chart missing: expected failure"; elif grep -q "the bundle $C
 setup OK "$GOOD_LOGIN" "SELECT 1 FROM repo LIMIT 1"
 echo "permission denied for view current_measurement" > "$WORK_DIR/check"
 echo 1 > "$WORK_DIR/check-status"
-if run; then fail "unreadable dataset: expected failure"; elif grep -q "cannot be read through Superset's connection" "$WORK_DIR/out" && grep -q "permission denied for view" "$WORK_DIR/out"; then pass "a dataset Superset cannot read fails, with its error"; else fail "unreadable dataset: $(cat "$WORK_DIR/out")"; fi
+if run; then fail "unreadable dataset: expected failure"; elif grep -q "the dashboard check failed in Superset's container" "$WORK_DIR/out" && grep -q "permission denied for view" "$WORK_DIR/out"; then pass "a dataset Superset cannot read fails, with its error"; else fail "unreadable dataset: $(cat "$WORK_DIR/out")"; fi
+
+# The check's last line, as tests/test_superset_row_limits.py pins row_limit_report's format.
+setup OK "$GOOD_LOGIN" "SELECT 1 FROM repo LIMIT 1"
+printf '%s\n' "chart rows: Operations 7497 of 50000" \
+    "dashboard datasets read: freshness 3; chart rows at most 15% of a row limit (Operations 7497 of 50000), fails past 80%" > "$WORK_DIR/check"
+if run && grep -q "ok: $CHARTS charts; dashboard datasets read: freshness 3; chart rows at most 15% of a row limit (Operations 7497 of 50000)" "$WORK_DIR/out"; then
+    pass "the charts' headroom under their row limit is reported"
+else
+    fail "row headroom: $(cat "$WORK_DIR/out")"
+fi
+
+setup OK "$GOOD_LOGIN" "SELECT 1 FROM repo LIMIT 1"
+echo "RuntimeError: chart queries past 80% of their row limit, which Superset truncates without an error (rows of limit): Operations 41000 of 50000" > "$WORK_DIR/check"
+echo 1 > "$WORK_DIR/check-status"
+if run; then fail "chart near its row limit: expected failure"; elif grep -q "the dashboard check failed in Superset's container" "$WORK_DIR/out" && grep -q "Operations 41000 of 50000" "$WORK_DIR/out"; then pass "a chart near its row limit fails, naming it"; else fail "row limit: $(cat "$WORK_DIR/out")"; fi
 
 if PATH="$WORK_DIR/bin:$PATH" sh "$UNDER_TEST" staging > /dev/null 2>&1; then fail "unknown env: expected refusal"; else pass "unknown environment refused"; fi
 

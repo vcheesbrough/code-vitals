@@ -12,8 +12,10 @@
 #   3. the reader role — Superset's datasource — can read the freshness view
 #      and is refused on a base table;
 #   4. the dashboard (superset/dashboard/, card #500) is imported with every
-#      chart of the bundle, and every one of its datasets reads through
-#      Superset's own `code-vitals` connection, in the running container.
+#      chart of the bundle, every one of its datasets reads through
+#      Superset's own `code-vitals` connection, in the running container, and
+#      no chart's query is past 80% of its row limit (card #552: Superset
+#      would truncate it without an error).
 #
 # Usage: smoke-superset.sh <dev|prod>
 # Environment: CODE_VITALS_READER_PASSWORD (never printed). Needs curl and docker.
@@ -133,7 +135,7 @@ if [ "$expected" -eq 0 ] || [ "$charts" != "$expected" ]; then
 fi
 if ! read_out=$(docker exec "$superset" python -m code_vitals_dashboard --check /app/code-vitals-dashboard 2>&1); then
   echo "$read_out" >&2
-  echo "ERROR: the dashboard's datasets cannot be read through Superset's connection" >&2
+  echo "ERROR: the dashboard check failed in Superset's container: a dataset cannot be read through its connection, a dropped object is left, or a chart is near its row limit" >&2
   exit 1
 fi
 echo "  ok: $charts charts; $(echo "$read_out" | tail -n 1)"

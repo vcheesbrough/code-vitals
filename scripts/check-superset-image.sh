@@ -8,7 +8,8 @@
 #   - the private FAB helper the sign-in relies on still exists;
 #   - it refuses to load when a required variable is missing;
 #   - the dashboard bundle and its importer are there (card #500), and the
-#     Superset models and columns its stale-object removal reads (card #549).
+#     Superset models and columns its stale-object removal reads (card #549),
+#     and how Superset works out a chart query's row limit (card #552).
 #
 # Usage: check-superset-image.sh <image-ref>
 set -eu
@@ -66,6 +67,9 @@ for path, needles in [
     ("models/dashboard.py", ["class Dashboard(", "dashboard_slices = Table(", "is_managed_externally = Column", "external_url = Column"]),
     ("models/slice.py", ["class Slice(", "datasource_id = Column", "datasource_type = Column", "is_managed_externally = Column", "external_url = Column"]),
     ("connectors/sqla/models.py", ["class SqlaTable(", "is_managed_externally = Column", "external_url = Column"]),
+    # The row-limit guard (card #552) works out the limit on a chart query as these do.
+    ("common/query_object_factory.py", ["row_limit or default_row_limit", "self._config[\"ROW_LIMIT\"]"]),
+    ("utils/core.py", ["def apply_max_row_limit(", "else app.config[\"SQL_MAX_ROW\"]", "return min(max_limit, limit)"]),
 ]:
     source = (package / path).read_text()
     for needle in needles:

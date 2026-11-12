@@ -6,6 +6,7 @@ its shell is run against a fake `docker` that records every call.
 """
 
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -55,6 +56,38 @@ def test_every_configured_repo_can_be_fetched(repo: str) -> None:
     assert REPOS[repo].url == f"https://github.com/vcheesbrough/{repo}.git"
 
 
+def test_the_step_never_takes_the_shells_stdin() -> None:
+    # Woodpecker pipes the script into the shell: an `exec <…` drops whatever
+    # the shell has not yet read, and the step exits 0 having done nothing
+    # (v-note pipeline 520). Where the cut falls depends on the shell's read
+    # buffer: _run_step's bash catches it (it reads a pipe a byte at a time),
+    # dash (CI's sh) and busybox ash may not. This check is shell-independent;
+    # keep both, and keep _run_step on bash.
+    (step,) = workflow("v-note")["steps"].values()
+    for line in step["commands"][0].splitlines():
+        assert not TAKES_STDIN.search(line.split("#", 1)[0]), line
+
+
+# `exec <…` as any command on a line, not only the first (v-note's
+# scripts/test-code-vitals-workflow.sh uses the same pattern).
+TAKES_STDIN = re.compile(r"(?:^|[;&|(])\s*exec\b.*<")
+
+
+@pytest.mark.parametrize(
+    ("line", "takes"),
+    [
+        ("exec < /dev/null", True),
+        ("  set -eu; exec </dev/null", True),
+        ("true && exec 0< /dev/null", True),
+        ("exec > log", False),
+        ("# exec < /dev/null", False),
+        ('docker start --attach "$cid"', False),
+    ],
+)
+def test_the_stdin_pattern(line: str, takes: bool) -> None:
+    assert bool(TAKES_STDIN.search(line.split("#", 1)[0])) is takes
+
+
 def test_the_moving_tag_appears_only_in_the_collector_command() -> None:
     (step,) = workflow("v-note")["steps"].values()
     assert ":stable" not in step["image"]
@@ -90,7 +123,12 @@ def _run_step(tmp_path: Path, repo: str, *, start_exit: int = 0) -> tuple[int, l
         "CODE_VITALS_WRITER_PASSWORD": "writerpw0123",
         "CI_PIPELINE_NUMBER": "77",
     }
-    status = subprocess.run(["sh", "-c", script], env=env, capture_output=True).returncode
+    # As Woodpecker runs it: the script on the shell's stdin. bash, unlike
+    # dash, reads a pipe a byte at a time, so a command that takes the
+    # shell's stdin cuts the script short right there, whatever its length.
+    status = subprocess.run(
+        ["bash"], input=script.encode(), env=env, capture_output=True
+    ).returncode
     return status, calls.read_text().splitlines(), created_env.read_text().strip()
 
 

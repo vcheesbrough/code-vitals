@@ -27,8 +27,8 @@ itself. Only this module and bootstrap.sh touch Superset's internals here;
 scripts/check-superset-image.sh fails the build if an upgrade removes them.
 
 `--check` counts every dataset through the connection instead of importing,
-and fails if anything the bundle no longer has is still there (other than a
-dataset kept for a chart made in Superset): scripts/smoke-superset.sh runs it
+and fails if anything the bundle no longer has is still there (other than what
+is kept because something made in Superset uses it): scripts/smoke-superset.sh runs it
 in the deployed Superset container.
 """
 
@@ -308,8 +308,8 @@ def check_datasets(contents: dict[str, str]) -> dict[str, int]:
     """Count each of the bundle's datasets through the imported `code-vitals`
     connection, as the dashboard would read it: proves the connection works
     as the reader after the import and every dataset's SQL runs. Fails if
-    anything the bundle no longer has is still in Superset (a dataset kept for
-    a chart made there excepted). Needs an app context."""
+    anything the bundle no longer has is still in Superset (what is kept
+    because something made there uses it excepted). Needs an app context."""
     import yaml
     from superset.connectors.sqla.models import SqlaTable
 

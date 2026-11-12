@@ -60,7 +60,9 @@ def test_the_step_never_takes_the_shells_stdin() -> None:
     # Woodpecker pipes the script into the shell: an `exec <…` drops whatever
     # the shell has not yet read, and the step exits 0 having done nothing
     # (v-note pipeline 520). Where the cut falls depends on the shell's read
-    # buffer, so running the script cannot reliably catch it; this does.
+    # buffer: _run_step's bash catches it (it reads a pipe a byte at a time),
+    # dash (CI's sh) and busybox ash may not. This check is shell-independent;
+    # keep both, and keep _run_step on bash.
     (step,) = workflow("v-note")["steps"].values()
     for line in step["commands"][0].splitlines():
         assert not TAKES_STDIN.search(line.split("#", 1)[0]), line

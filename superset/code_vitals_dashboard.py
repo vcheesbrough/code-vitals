@@ -9,7 +9,13 @@ after `set-database-uri`:
     python -m code_vitals_dashboard /app/code-vitals-dashboard
 
 It overwrites the bundle's datasets, charts and dashboard (matched by UUID),
-so a deleted or edited dashboard is restored by the next deploy. It never
+so a deleted or edited dashboard is restored by the next deploy. Whatever an
+earlier bundle imported and this one no longer has (a removed chart or
+dataset, card #549) is deleted in the same transaction, so Superset holds
+exactly the bundle: an import is identified as ours by being managed
+externally with an external_url into this repo's bundle. A removed chart on a
+dashboard made in Superset, or a removed dataset a chart made there still
+uses, is kept (deleting it would break that dashboard or chart) and reported. It never
 imports the database file: the connection belongs to `set-database-uri`,
 which alone knows the reader's password. The database file only names that
 connection; the import gives the existing connection the file's UUID (the
@@ -20,8 +26,10 @@ local admin (everyone signs in through Authentik), and this is the deployment
 itself. Only this module and bootstrap.sh touch Superset's internals here;
 scripts/check-superset-image.sh fails the build if an upgrade removes them.
 
-`--check` counts every dataset through the connection instead of importing:
-scripts/smoke-superset.sh runs it in the deployed Superset container.
+`--check` counts every dataset through the connection instead of importing,
+and fails if anything the bundle no longer has is still there (other than what
+is kept because something made in Superset uses it): scripts/smoke-superset.sh runs it
+in the deployed Superset container.
 """
 
 from __future__ import annotations
@@ -33,6 +41,12 @@ from typing import Any
 
 DATABASE_NAME = "code-vitals"
 DATABASE_FILE = "databases/code-vitals.yaml"
+# Every file of the bundle carries an external_url under this prefix, which is
+# how an import of ours is told apart from something made in Superset.
+BUNDLE_URL = "https://github.com/vcheesbrough/code-vitals/blob/main/superset/dashboard/"
+# The kinds the import writes, in the order stale ones are deleted: charts
+# before the datasets they use.
+KINDS = ("dashboards", "charts", "datasets")
 
 
 def read_bundle(root: Path) -> dict[str, str]:
@@ -50,10 +64,125 @@ def read_bundle(root: Path) -> dict[str, str]:
     return contents
 
 
-def import_bundle(contents: dict[str, str]) -> dict[str, int]:
+def bundle_uuids(contents: dict[str, str]) -> dict[str, set[str]]:
+    """The UUIDs of the bundle's dashboards, charts and datasets, by kind."""
+    import yaml
+
+    uuids: dict[str, set[str]] = {kind: set() for kind in KINDS}
+    for name, text in contents.items():
+        kind = name.split("/")[0]
+        if kind in uuids:
+            uuids[kind].add(str(yaml.safe_load(text)["uuid"]))
+    return uuids
+
+
+def is_ours(is_managed_externally: bool | None, external_url: str | None) -> bool:
+    """Whether a dashboard, chart or dataset in Superset came from this bundle."""
+    return bool(is_managed_externally) and (external_url or "").startswith(BUNDLE_URL)
+
+
+def stale(found: list[tuple[str, bool | None, str | None]], wanted: set[str]) -> list[str]:
+    """Of `found` — (uuid, is_managed_externally, external_url) of one kind in
+    Superset — the UUIDs an earlier bundle imported and `wanted` (this
+    bundle's UUIDs of that kind) no longer has."""
+    return sorted(
+        uuid_ for uuid_, managed, url in found if is_ours(managed, url) and uuid_ not in wanted
+    )
+
+
+def split_stale(
+    candidates: list[tuple[str, list[str]]], removed: set[str]
+) -> tuple[list[str], list[str]]:
+    """Split stale objects of one kind — (key, keys of what uses it) — into
+    those to delete and those to keep. One is kept while anything not being
+    removed still uses it: a chart on a dashboard made in Superset, a dataset
+    of a chart made there (or of a chart kept for that reason). `removed`
+    holds what is already being deleted (callers go dashboards, then charts,
+    then datasets) and gains what this call deletes."""
+    remove: list[str] = []
+    keep: list[str] = []
+    for key, users in candidates:
+        if all(user in removed for user in users):
+            remove.append(key)
+            removed.add(key)
+        else:
+            keep.append(key)
+    return remove, keep
+
+
+def _stale_objects(contents: dict[str, str]) -> tuple[list[Any], list[Any]]:
+    """What an earlier bundle imported and this one no longer has, in deletion
+    order, and what of it is kept because something made in Superset still
+    uses it (split_stale). Needs an app context."""
+    from sqlalchemy.sql import select
+    from superset.connectors.sqla.models import SqlaTable
+    from superset.models.dashboard import Dashboard, dashboard_slices
+    from superset.models.slice import Slice
+
+    from superset import db
+
+    models = {"dashboards": Dashboard, "charts": Slice, "datasets": SqlaTable}
+    wanted = bundle_uuids(contents)
+    removed: set[str] = set()
+    remove: list[Any] = []
+    kept: list[Any] = []
+    for kind in KINDS:
+        model = models[kind]
+        rows = db.session.query(model).filter(model.is_managed_externally.is_(True)).all()
+        found = [(str(row.uuid), row.is_managed_externally, row.external_url) for row in rows]
+        old = set(stale(found, wanted[kind]))
+        candidates: dict[str, Any] = {}
+        uses: list[tuple[str, list[str]]] = []
+        for row in rows:
+            if str(row.uuid) not in old:
+                continue
+            key = f"{kind}:{row.id}"
+            candidates[key] = row
+            if kind == "charts":
+                # The table, not the relationship: the import rewrote it above.
+                query = select(dashboard_slices.c.dashboard_id).where(
+                    dashboard_slices.c.slice_id == row.id
+                )
+                users = [f"dashboards:{i}" for i in db.session.execute(query).scalars()]
+            elif kind == "datasets":
+                charts = db.session.query(Slice.id).filter(
+                    Slice.datasource_type == "table", Slice.datasource_id == row.id
+                )
+                users = [f"charts:{i}" for (i,) in charts]
+            else:
+                users = []
+            uses.append((key, users))
+        delete, keep = split_stale(uses, removed)
+        remove.extend(candidates[k] for k in delete)
+        kept.extend(candidates[k] for k in keep)
+    return remove, kept
+
+
+def _describe(row: Any) -> str:
+    kind = type(row).__name__
+    name = getattr(row, "dashboard_title", None) or getattr(row, "slice_name", None)
+    return f"{kind} {name or row.table_name}"
+
+
+def remove_stale(contents: dict[str, str]) -> tuple[list[str], list[str]]:
+    """Delete what an earlier bundle imported and this one no longer has (in
+    the caller's transaction); returns what was removed and what was kept.
+    Needs an app context."""
+    from superset import db
+
+    remove, kept = _stale_objects(contents)
+    for row in remove:
+        db.session.delete(row)
+    db.session.flush()
+    return [_describe(r) for r in remove], [_describe(r) for r in kept]
+
+
+def import_bundle(contents: dict[str, str]) -> dict[str, Any]:
     """Import (overwrite) the bundle's datasets, charts and dashboards against
-    the existing `code-vitals` connection; returns how many of each. Needs an
-    app context. All or nothing: any failure rolls the whole import back."""
+    the existing `code-vitals` connection, and delete what an earlier bundle
+    imported and this one no longer has; returns how many of each were
+    imported and what was removed or kept. Needs an app context. All or
+    nothing: any failure rolls the whole import back."""
     # Superset is importable only inside its image; keep this module loadable
     # without it (tests/test_superset_dashboard.py).
     import yaml
@@ -161,18 +290,26 @@ def import_bundle(contents: dict[str, str]) -> dict[str, int]:
                 )
             )
             dashboards += 1
+        removed, kept = remove_stale(contents)
         db.session.commit()
     except BaseException:
         db.session.rollback()
         raise
-    return {"datasets": len(dataset_info), "charts": len(chart_ids), "dashboards": dashboards}
+    return {
+        "datasets": len(dataset_info),
+        "charts": len(chart_ids),
+        "dashboards": dashboards,
+        "removed": removed,
+        "kept": kept,
+    }
 
 
 def check_datasets(contents: dict[str, str]) -> dict[str, int]:
     """Count each of the bundle's datasets through the imported `code-vitals`
     connection, as the dashboard would read it: proves the connection works
-    as the reader after the import and every dataset's SQL runs. Needs an app
-    context."""
+    as the reader after the import and every dataset's SQL runs. Fails if
+    anything the bundle no longer has is still in Superset (what is kept
+    because something made there uses it excepted). Needs an app context."""
     import yaml
     from superset.connectors.sqla.models import SqlaTable
 
@@ -189,6 +326,10 @@ def check_datasets(contents: dict[str, str]) -> dict[str, int]:
         source = f"({dataset.sql}) AS d" if dataset.sql else dataset.table_name
         frame = dataset.database.get_df(f"SELECT count(*) AS n FROM {source}")
         counts[dataset.table_name] = int(frame["n"][0])
+    remove, _ = _stale_objects(contents)
+    if remove:
+        names = ", ".join(_describe(r) for r in remove)
+        raise RuntimeError(f"no longer in the bundle but still in Superset: {names}")
     return counts
 
 
@@ -216,6 +357,9 @@ def main(argv: list[str]) -> int:
         f"dashboard imported: {counts['datasets']} datasets, {counts['charts']} charts, "
         f"{counts['dashboards']} dashboard(s)"
     )
+    print("removed (no longer in the bundle): " + (", ".join(counts["removed"]) or "nothing"))
+    for name in counts["kept"]:
+        print(f"kept although no longer in the bundle, something made in Superset uses it: {name}")
     return 0
 
 

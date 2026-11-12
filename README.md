@@ -166,26 +166,31 @@ The **code-vitals dashboard** (`/superset/dashboard/code-vitals/`) is code:
 unzipped — `metadata.yaml`, `databases/`, `datasets/`, `charts/`,
 `dashboards/`), and every deploy imports it over whatever is there
 (`superset/code_vitals_dashboard.py`), so a deleted or edited dashboard comes
-back on the next deploy. To change it, edit the YAML (or build a copy in
+back on the next deploy, and a dataset, chart or dashboard dropped from the
+bundle is deleted from Superset (one still used by a chart made in Superset is
+kept and reported). To change it, edit the YAML (or build a copy in
 Superset, export it and bring the YAML back) — never the `sqlalchemy_uri` in
 `databases/code-vitals.yaml`, which stays masked: the deploy never imports the
 database file, and the connection's URI is set by `set-database-uri`. The
 datasets read only the reader's views; `tests/test_superset_dashboard.py`
-checks that, the references, the filters and the colours.
+checks that, the references, the filters and the colours, and
+`tests/test_superset_datasets.py` runs the datasets' SQL as the reader.
 
 | Dataset | What |
 | --- | --- |
-| `weekly_snapshot` | snapshot measures at the end of every week: each repo's last measured commit on or before it, carried forward through weeks without commits |
+| `commit_snapshot` | snapshot measures at every trunk commit time (any repo's): each repo's last measured commit at or before it, carried forward, so a repo's series steps only at its own commits and totals never dip. Plot it with **no time grain** — a grain would sum several commits' states |
 | `iteration_snapshot` | snapshot measures at each iteration's last commit |
-| `current_measurement` | the view, for flow measures (churn), summed per period |
+| `current_measurement` | the view, for flow measures (churn): a bar per commit, or summed per iteration |
 | `hotspots` | `current_function_complexity` plus the week and a commit label |
 | `freshness` | the view: each repo's newest recorded commit, its age and the last run |
 
 Ratios are Superset metrics (complexity per 1,000 lines, average complexity
-per function, test share of lines). Filters: Repo, Area, Week (a time range)
-and Iteration apply to every chart whose dataset has the column, except Area
-on the test share (a ratio across areas); Commit picks the moment of the
-Hotspots table (newest first), which the Week range leaves alone. The **Freshness** table, one
+per function, test share of lines). Every over-time chart has a point per
+commit at its commit time (no time grain); snapshots are drawn as steps.
+Filters: Repo, Area, Commit time (a time range on `committed_at`) and Iteration
+apply to every chart whose dataset has the column, except Area on the test
+share (a ratio across areas); Commit picks the moment of the Hotspots table
+(newest first), which the Commit time range leaves alone. The **Freshness** table, one
 row per repo, is the pipeline's health check (no alerts, by decision). Colours
 come from the dataviz reference palette (`codeVitals` in
 `superset_config.py`), one fixed slot per repo and per area.

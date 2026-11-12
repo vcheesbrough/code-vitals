@@ -53,9 +53,9 @@ else
     fail "runs the command: $(cat "$WORK_DIR/out")"
 fi
 
-if grep -q "^rm -f old$" "$WORK_DIR/docker-calls" \
-    && ! grep -q "^rm -f young$" "$WORK_DIR/docker-calls" \
-    && ! grep -q "^rm -f nolabel$" "$WORK_DIR/docker-calls"; then
+if grep -q "^rm -f -v old$" "$WORK_DIR/docker-calls" \
+    && ! grep -q "^rm -f -v young$" "$WORK_DIR/docker-calls" \
+    && ! grep -q "^rm -f -v nolabel$" "$WORK_DIR/docker-calls"; then
     pass "reaps only labelled containers started over an hour ago"
 else
     fail "reaper: calls: $(cat "$WORK_DIR/docker-calls")"
@@ -79,8 +79,8 @@ else
     fail "url: '$(cat "$WORK_DIR/url" 2>/dev/null)'"
 fi
 
-if tail -n 1 "$WORK_DIR/docker-calls" | grep -q "^rm -f code-vitals-test-postgres-"; then
-    pass "removes its own container afterwards"
+if tail -n 1 "$WORK_DIR/docker-calls" | grep -q "^rm -f -v code-vitals-test-postgres-"; then
+    pass "removes its own container and its volume afterwards"
 else
     fail "cleanup: $(tail -n 1 "$WORK_DIR/docker-calls")"
 fi

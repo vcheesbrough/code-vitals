@@ -8,7 +8,8 @@
 #
 # Starts a sibling postgres container on the same docker daemon, waits until it
 # accepts connections, exports CODE_VITALS_TEST_DATABASE_URL pointing at it,
-# runs the command, and removes the container however the command ends. The
+# runs the command, and removes the container — with its anonymous data volume,
+# which `--rm` leaves behind on a forced removal — however the command ends. The
 # tests create one database per test (tests/conftest.py), so nothing needs
 # cleaning between runs — the container is the cleanup.
 #
@@ -38,7 +39,7 @@ for stale in $(docker ps -aq --filter label=code-vitals.test-postgres=1); do
   esac
   if [ "$started" -lt $((now - 3600)) ]; then
     echo "removing stale test postgres $stale"
-    docker rm -f "$stale" > /dev/null 2>&1 || true
+    docker rm -f -v "$stale" > /dev/null 2>&1 || true
   fi
 done
 
@@ -49,7 +50,7 @@ docker run -d --rm --name "$NAME" --label code-vitals.test-postgres=1 \
   -e POSTGRES_PASSWORD="$PASSWORD" -e POSTGRES_USER=code_vitals -e POSTGRES_DB=code_vitals \
   "$IMAGE" -c fsync=off -c synchronous_commit=off -c full_page_writes=off > /dev/null
 # shellcheck disable=SC2064  # expand NAME now, not at trap time
-trap "docker rm -f '$NAME' > /dev/null 2>&1 || true" EXIT INT TERM
+trap "docker rm -f -v '$NAME' > /dev/null 2>&1 || true" EXIT INT TERM
 
 ready=0
 for _ in $(seq 1 60); do

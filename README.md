@@ -182,6 +182,14 @@ counts those rows for every such chart and fails once one passes 80% of its
 limit (card #552), reporting the closest chart. It runs only when code-vitals
 deploys, while the rows grow with every measured repo's commits, so the 20%
 headroom must cover the growth between two deploys.
+The import itself is tested against the real Superset in the image before the push
+pipeline publishes it (`superset/dashboard_import_test.py`, run by
+`scripts/check-superset-import.sh`): the connection keeps its URI and gets the
+bundle's UUID, a re-run changes nothing, the dashboard's charts are replaced
+rather than merged, a failing import changes nothing, and what the bundle
+dropped is deleted unless something made in Superset uses it. Locally, after
+building both images:
+`./scripts/with-test-postgres.sh ./scripts/check-superset-import.sh <superset-image> <collector-image>`.
 
 | Dataset | What |
 | --- | --- |

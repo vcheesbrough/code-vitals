@@ -100,7 +100,7 @@ def test_the_step_runs_the_collector_by_name_on_both_networks(tmp_path: Path) ->
     assert status == 0
     assert calls[0] == "login registry.desync.link -u ci --password-stdin"
     assert calls[1] == (
-        "create --pull always --network code-vitals_default -e CODE_VITALS_DATABASE_URL"
+        "create --rm --pull always --network code-vitals_default -e CODE_VITALS_DATABASE_URL"
         " -e OTEL_EXPORTER_OTLP_ENDPOINT -e OTEL_EXPORTER_OTLP_PROTOCOL"
         f" -e OTEL_RESOURCE_ATTRIBUTES -e CI_PIPELINE_NUMBER {STABLE}"
         " collect --repo v-note --fetch --trigger push"

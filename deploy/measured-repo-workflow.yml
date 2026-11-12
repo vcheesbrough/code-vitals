@@ -48,7 +48,10 @@ steps:
         export OTEL_EXPORTER_OTLP_ENDPOINT=http://monitor-alloy:4318
         export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
         export OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=prod
-        cid=$$(docker create --pull always --network code-vitals_default \
+        # --rm: the daemon removes the container whenever it exits, even if
+        # this step is cancelled or times out first; the trap covers a failure
+        # before it starts.
+        cid=$$(docker create --rm --pull always --network code-vitals_default \
           -e CODE_VITALS_DATABASE_URL -e OTEL_EXPORTER_OTLP_ENDPOINT \
           -e OTEL_EXPORTER_OTLP_PROTOCOL -e OTEL_RESOURCE_ATTRIBUTES -e CI_PIPELINE_NUMBER \
           registry.desync.link/code-vitals-collector:stable \

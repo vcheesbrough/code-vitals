@@ -178,6 +178,53 @@ def test_a_non_recomputable_measure_is_not_pinned_at_the_fixed_commits(
     assert check_status(writer, [FIXTURE], measures=measures) == []
 
 
+def test_a_recorded_non_recomputable_measure_is_not_pinned_either(
+    db: tuple[str, str], repo: FixtureRepo
+) -> None:
+    owner, writer = db
+    released_at = repo.git("show", "-s", "--format=%cI", repo.shas[0])
+    with psycopg.connect(owner) as conn:  # released before every fixture commit
+        conn.execute(
+            "INSERT INTO measure (name, version, unit, kind, definition, recomputable,"
+            " released_at) VALUES (%s, 1, %s, %s, %s, false, %s)",
+            (Snapshot.name, Snapshot.unit, str(Snapshot.kind), Snapshot.definition, released_at),
+        )
+    measures: list[Measure] = [Files(), Snapshot()]
+    collect(writer, FIXTURE, repo.path, Trigger.BACKFILL, BUILD, measures=measures)
+    # It is recorded at the fixed commit, yet its value there is not compared.
+    recorded = _rows(
+        owner,
+        "SELECT count(*) FROM commit_measure cm JOIN commit c ON c.id = cm.commit_id"
+        f" JOIN measure m ON m.id = cm.measure_id WHERE m.name = 'snapshot'"
+        f" AND c.sha = '{repo.shas[1]}'",
+    )
+    assert recorded == [(1,)]
+    assert (
+        check_repo(
+            writer,
+            FIXTURE,
+            repo.path,
+            BUILD,
+            measures=measures,
+            expected=load_expected(_table(repo)),
+        )
+        == []
+    )
+
+    # A table that pins it anyway is refused.
+    pinned = _table(repo) + f'\n[fixture.commits.{repo.shas[1]}.snapshot]\nversion = 1\n"-" = 3\n'
+    problems = check_repo(
+        writer, FIXTURE, repo.path, BUILD, measures=measures, expected=load_expected(pinned)
+    )
+    assert len(problems) == 1
+    assert "snapshot is not a recomputable registered measure" in problems[0]
+
+
+def _rows(url: str, sql: str) -> list[tuple[object, ...]]:
+    with psycopg.connect(url) as conn:
+        return conn.execute(sql).fetchall()
+
+
 def test_status_passes_once_every_repo_is_collected(db: tuple[str, str], repo: FixtureRepo) -> None:
     _, writer = db
     _collected(writer, repo)

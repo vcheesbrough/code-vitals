@@ -479,6 +479,21 @@ def _setup() -> None:
     print(f"ok   - bootstrap ({time.monotonic() - started:.0f} s): {' '.join(lines)}")
 
 
+def _restore() -> None:
+    """Back to where every test starts after one failed, whatever it had
+    committed: no dashboard made in Superset, the bundle imported (which also
+    realigns the connection), so the next failure is its own."""
+    from superset.models.dashboard import Dashboard
+
+    from superset import db
+
+    db.session.rollback()
+    for theirs in db.session.query(Dashboard).filter_by(slug="made-in-superset"):
+        db.session.delete(theirs)
+    db.session.commit()
+    _import(CONTENTS)
+
+
 def main() -> int:
     _setup()
     from superset.app import create_app
@@ -493,9 +508,12 @@ def main() -> int:
                 failures += 1
                 print(f"FAIL - {test.__name__}", file=sys.stderr)
                 traceback.print_exc()
-                from superset import db
-
-                db.session.rollback()
+                try:
+                    _restore()
+                except Exception:
+                    traceback.print_exc()
+                    print("FAIL - could not restore the bundle; the rest are not run")
+                    return 1
             else:
                 print(f"ok   - {test.__name__} ({time.monotonic() - started:.1f} s)")
     print(f"{len(TESTS) - failures} passed, {failures} failed")

@@ -1,41 +1,30 @@
 slice_name: Lines (NLOC)
-description: Lines (lizard NLOC) at the end of the latest week, across the selected repos and areas.
+description: Lines (lizard NLOC) at the latest commit, across the selected repos and areas; the trendline
+  has a point per commit.
 certified_by: null
 certification_details: null
 viz_type: big_number
 params:
   viz_type: big_number
-  x_axis: week
-  time_grain_sqla: P1W
+  x_axis: committed_at
+  time_grain_sqla: null
   metric: lines
   adhoc_filters:
   - clause: WHERE
     expressionType: SIMPLE
-    subject: week
+    subject: committed_at
     operator: TEMPORAL_RANGE
     comparator: No filter
     isExtra: false
     isNew: false
     sqlExpression: null
-    filterOptionName: filter_week_temporal_range
-  - clause: WHERE
-    expressionType: SIMPLE
-    subject: measure
-    operator: IN
-    comparator:
-    - nloc
-    isExtra: false
-    isNew: false
-    sqlExpression: null
-    filterOptionName: filter_measure_in
+    filterOptionName: filter_committed_at_temporal_range
   show_trend_line: true
   start_y_axis_at_zero: true
-  compare_lag: 4
-  compare_suffix: vs 4 weeks before
   header_font_size: 0.4
   subheader_font_size: 0.15
   y_axis_format: ',d'
-  time_format: smart_date
+  time_format: '%Y-%m-%d %H:%M'
   color_picker:
     r: 42
     g: 120
@@ -47,6 +36,6 @@ query_context: null
 cache_timeout: null
 uuid: 6b4c3c92-0f68-58dc-ab81-9e9c35a88e22
 version: 1.0.0
-dataset_uuid: 11cdd17c-a94a-5986-9c81-ff3ecefe7f22
+dataset_uuid: 608f9000-5474-5448-a9f7-d31a35f4a348
 is_managed_externally: true
 external_url: https://github.com/vcheesbrough/code-vitals/blob/main/superset/dashboard/charts/tile_lines.yaml

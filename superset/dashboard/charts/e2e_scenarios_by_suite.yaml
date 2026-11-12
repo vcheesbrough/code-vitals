@@ -1,23 +1,23 @@
 slice_name: End-to-end scenarios
-description: End-to-end scenarios at the end of each week, by suite.
+description: End-to-end scenarios at every commit, by suite.
 certified_by: null
 certification_details: null
 viz_type: echarts_area
 params:
   viz_type: echarts_area
-  time_grain_sqla: P1W
+  time_grain_sqla: null
   x_axis_sort_asc: true
   x_axis_sort_series: name
   x_axis_sort_series_ascending: true
-  x_axis_time_format: smart_date
+  x_axis_time_format: '%Y-%m-%d'
   rich_tooltip: true
-  tooltipTimeFormat: smart_date
+  tooltipTimeFormat: '%Y-%m-%d %H:%M'
   show_legend: true
   legendType: scroll
   legendOrientation: top
   row_limit: 10000
   truncate_metric: true
-  show_empty_columns: true
+  show_empty_columns: false
   comparison_type: values
   annotation_layers: []
   forecastEnabled: false
@@ -32,7 +32,7 @@ params:
   y_axis_title_position: Left
   color_scheme: codeVitals
   extra_form_data: {}
-  x_axis: week
+  x_axis: committed_at
   metrics:
   - e2e_scenarios
   groupby:
@@ -40,33 +40,23 @@ params:
   adhoc_filters:
   - clause: WHERE
     expressionType: SIMPLE
-    subject: week
+    subject: committed_at
     operator: TEMPORAL_RANGE
     comparator: No filter
     isExtra: false
     isNew: false
     sqlExpression: null
-    filterOptionName: filter_week_temporal_range
-  - clause: WHERE
-    expressionType: SIMPLE
-    subject: measure
-    operator: IN
-    comparator:
-    - e2e_scenarios
-    isExtra: false
-    isNew: false
-    sqlExpression: null
-    filterOptionName: filter_measure_in
+    filterOptionName: filter_committed_at_temporal_range
   y_axis_format: SMART_NUMBER
   stack: Stack
   opacity: 0.7
-  seriesType: line
+  seriesType: end
   show_value: false
   only_total: true
 query_context: null
 cache_timeout: null
 uuid: 38bd390b-1c4c-5cc2-89c7-31a3f7701c76
 version: 1.0.0
-dataset_uuid: 11cdd17c-a94a-5986-9c81-ff3ecefe7f22
+dataset_uuid: 608f9000-5474-5448-a9f7-d31a35f4a348
 is_managed_externally: true
 external_url: https://github.com/vcheesbrough/code-vitals/blob/main/superset/dashboard/charts/e2e_scenarios_by_suite.yaml

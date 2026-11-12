@@ -1,23 +1,24 @@
 slice_name: Complexity per 1,000 lines
-description: complexity_total / nloc x 1,000 at the end of each week, per repo.
+description: complexity_total / nloc x 1,000 at every commit, per repo (each repo carried forward between
+  its commits).
 certified_by: null
 certification_details: null
 viz_type: echarts_timeseries_line
 params:
   viz_type: echarts_timeseries_line
-  time_grain_sqla: P1W
+  time_grain_sqla: null
   x_axis_sort_asc: true
   x_axis_sort_series: name
   x_axis_sort_series_ascending: true
-  x_axis_time_format: smart_date
+  x_axis_time_format: '%Y-%m-%d'
   rich_tooltip: true
-  tooltipTimeFormat: smart_date
+  tooltipTimeFormat: '%Y-%m-%d %H:%M'
   show_legend: true
   legendType: scroll
   legendOrientation: top
   row_limit: 10000
   truncate_metric: true
-  show_empty_columns: true
+  show_empty_columns: false
   comparison_type: values
   annotation_layers: []
   forecastEnabled: false
@@ -32,7 +33,7 @@ params:
   y_axis_title_position: Left
   color_scheme: codeVitals
   extra_form_data: {}
-  x_axis: week
+  x_axis: committed_at
   metrics:
   - complexity_per_1000_lines
   groupby:
@@ -40,30 +41,19 @@ params:
   adhoc_filters:
   - clause: WHERE
     expressionType: SIMPLE
-    subject: week
+    subject: committed_at
     operator: TEMPORAL_RANGE
     comparator: No filter
     isExtra: false
     isNew: false
     sqlExpression: null
-    filterOptionName: filter_week_temporal_range
-  - clause: WHERE
-    expressionType: SIMPLE
-    subject: measure
-    operator: IN
-    comparator:
-    - nloc
-    - complexity_total
-    isExtra: false
-    isNew: false
-    sqlExpression: null
-    filterOptionName: filter_measure_in
+    filterOptionName: filter_committed_at_temporal_range
   y_axis_format: ',.1f'
-  seriesType: line
+  seriesType: end
 query_context: null
 cache_timeout: null
 uuid: ebc36263-3ffe-59b5-b004-6e03094b476e
 version: 1.0.0
-dataset_uuid: 11cdd17c-a94a-5986-9c81-ff3ecefe7f22
+dataset_uuid: 608f9000-5474-5448-a9f7-d31a35f4a348
 is_managed_externally: true
 external_url: https://github.com/vcheesbrough/code-vitals/blob/main/superset/dashboard/charts/complexity_per_1000_by_repo.yaml

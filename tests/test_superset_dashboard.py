@@ -5,8 +5,9 @@ superset/code_vitals_dashboard.py (loaded here by path, like
 code_vitals_auth.py; it imports Superset only inside import_bundle). These
 tests check the bundle on its own: it reads only the views the reader role may
 read, every reference resolves, every chart is on the dashboard, the filters
-cover repo, area, week and iteration on every chart they can apply to, and the
-database file carries no secret.
+cover repo, area, commit time and iteration on every chart they can apply to,
+the over-time charts have a point per commit (card #549), and the database
+file carries no secret. tests/test_superset_datasets.py runs the datasets' SQL.
 """
 
 import ast
@@ -127,7 +128,11 @@ def test_datasets_use_the_code_vitals_connection() -> None:
 
 def _tables_read(sql: str) -> set[str]:
     sql = re.sub(r"--[^\n]*", "", sql)
-    ctes = set(re.findall(r"(?:WITH|,)\s*(\w+)\s+AS\s*\(", sql, flags=re.IGNORECASE))
+    ctes = set(
+        re.findall(
+            r"(?:WITH|,)\s*(\w+)\s+AS\s+(?:(?:NOT\s+)?MATERIALIZED\s*)?\(", sql, flags=re.IGNORECASE
+        )
+    )
     tables = set(re.findall(r"\b(?:FROM|JOIN)\s+([\w.]+)", sql, flags=re.IGNORECASE))
     return tables - ctes
 
@@ -147,7 +152,10 @@ def test_datasets_read_only_the_reader_views() -> None:
 
 
 def test_the_table_check_sees_through_ctes() -> None:
-    sql = "WITH a AS (SELECT * FROM freshness), b AS (SELECT * FROM a) SELECT * FROM b JOIN repo r"
+    sql = (
+        "WITH a AS (SELECT * FROM freshness), b AS MATERIALIZED (SELECT * FROM a),"
+        " c AS NOT MATERIALIZED (SELECT * FROM b) SELECT * FROM c JOIN repo r"
+    )
     assert _tables_read(sql) == {"freshness", "repo"}
 
 
@@ -168,7 +176,7 @@ def _dataset(name: str) -> dict[str, Any]:
 @pytest.mark.parametrize(
     ("dataset", "kind"),
     [
-        ("weekly_snapshot", Kind.SNAPSHOT),
+        ("commit_snapshot", Kind.SNAPSHOT),
         ("iteration_snapshot", Kind.SNAPSHOT),
         ("current_measurement", Kind.FLOW),
     ],
@@ -184,12 +192,15 @@ def test_metrics_aggregate_measures_by_their_kind(dataset: str, kind: Kind) -> N
 
 
 def test_snapshot_datasets_agree_on_their_metrics() -> None:
-    assert _dataset("weekly_snapshot")["metrics"] == _dataset("iteration_snapshot")["metrics"]
-    assert _dataset("weekly_snapshot")["columns"] == _dataset("iteration_snapshot")["columns"]
+    assert _dataset("commit_snapshot")["metrics"] == _dataset("iteration_snapshot")["metrics"]
+    per_commit = {c["column_name"]: c for c in _dataset("commit_snapshot")["columns"]}
+    per_iteration = {c["column_name"]: c for c in _dataset("iteration_snapshot")["columns"]}
+    for name in ["repo", "iteration", "measure", "unit", "area", "facet", "value"]:
+        assert per_commit[name] == per_iteration[name], name
 
 
 def test_ratios_are_metrics_not_measures() -> None:
-    metrics = {m["metric_name"]: m for m in _dataset("weekly_snapshot")["metrics"]}
+    metrics = {m["metric_name"]: m for m in _dataset("commit_snapshot")["metrics"]}
     assert _measures_named(metrics["complexity_per_1000_lines"]["expression"]) == {
         "complexity_total",
         "nloc",
@@ -228,9 +239,26 @@ def test_charts_use_known_datasets_metrics_and_columns() -> None:
         known = {m["metric_name"] for m in dataset["metrics"]}
         assert set(metrics) <= known, (name, set(metrics) - known)
         assert _chart_columns(params) <= _columns(dataset), (name, dataset["table_name"])
-        for f in params.get("adhoc_filters", []):
-            if f["subject"] == "measure":
-                assert set(f["comparator"]) <= KINDS.keys(), name
+
+
+def test_no_chart_filters_on_measure() -> None:
+    # Every metric selects its measures in its own FILTER (WHERE ...); a chart
+    # filter on `measure` would only make swapping the metric in Explore (e.g.
+    # Size by area to Code lines (tokei)) return nothing.
+    for data in CHARTS.values():
+        subjects = {f["subject"] for f in data["params"].get("adhoc_filters", [])}
+        assert "measure" not in subjects, data["slice_name"]
+
+
+def test_every_dataset_is_used() -> None:
+    used = {data["dataset_uuid"] for data in CHARTS.values()} | {
+        target["datasetUuid"]
+        for f in FILTERS.values()
+        for target in f["targets"]
+        if "datasetUuid" in target
+    }
+    assert used == set(DATASETS)
+    assert "weekly_snapshot" not in {d["table_name"] for d in DATASETS.values()}
 
 
 def test_every_chart_is_on_the_dashboard_once() -> None:
@@ -265,10 +293,11 @@ def test_the_layout_is_a_tree() -> None:
     assert seen == components
 
 
-def test_filters_cover_repo_area_week_and_iteration() -> None:
+def test_filters_cover_repo_area_commit_time_and_iteration() -> None:
     assert FILTERS["Repo"]["filterType"] == "filter_select"
     assert FILTERS["Area"]["filterType"] == "filter_select"
-    assert FILTERS["Week"]["filterType"] == "filter_time"
+    assert FILTERS["Commit time"]["filterType"] == "filter_time"
+    assert "Week" not in FILTERS
     assert FILTERS["Iteration"]["filterType"] == "filter_select"
     for name, column in [("Repo", "repo"), ("Area", "area"), ("Iteration", "iteration")]:
         (target,) = FILTERS[name]["targets"]
@@ -278,7 +307,7 @@ def test_filters_cover_repo_area_week_and_iteration() -> None:
 # Charts a filter skips although their dataset has its column: Hotspots'
 # moment is the Commit filter's, and the test share is a ratio across areas
 # (an Area filter would make it 0% or 100%).
-EXCEPTIONS = {("Week", "Hotspots"), ("Area", "Test share of lines")}
+EXCEPTIONS = {("Commit time", "Hotspots"), ("Area", "Test share of lines")}
 
 
 def test_filters_reach_every_chart_that_has_their_column() -> None:
@@ -288,7 +317,7 @@ def test_filters_reach_every_chart_that_has_their_column() -> None:
         ("Repo", "repo"),
         ("Area", "area"),
         ("Iteration", "iteration"),
-        ("Week", "week"),
+        ("Commit time", "committed_at"),
     ]:
         excluded = set(FILTERS[name]["scope"]["excluded"])
         assert FILTERS[name]["scope"]["rootPath"] == ["ROOT_ID"]
@@ -305,10 +334,11 @@ def test_filters_reach_every_chart_that_has_their_column() -> None:
     }
 
 
-def test_week_filter_reaches_every_time_series() -> None:
+def test_commit_time_filter_reaches_every_time_series() -> None:
     # The dashboard's time range replaces each chart's TEMPORAL_RANGE filter;
-    # charts on the iteration axis carry one on `week` so the range reaches them.
-    excluded = set(FILTERS["Week"]["scope"]["excluded"])
+    # charts on the iteration axis carry one on `committed_at` so the range
+    # reaches them too.
+    excluded = set(FILTERS["Commit time"]["scope"]["excluded"])
     for data_uuid, chart_id in PLACED.items():
         if chart_id in excluded:
             continue
@@ -317,7 +347,80 @@ def test_week_filter_reaches_every_time_series() -> None:
             for f in CHARTS[data_uuid]["params"]["adhoc_filters"]
             if f["operator"] == "TEMPORAL_RANGE"
         ]
-        assert subjects == ["week"], CHARTS[data_uuid]["slice_name"]
+        assert subjects == ["committed_at"], CHARTS[data_uuid]["slice_name"]
+
+
+def _over_time() -> list[dict[str, Any]]:
+    """The charts whose x-axis is a time column of their dataset."""
+    charts = []
+    for data in CHARTS.values():
+        x_axis = data["params"].get("x_axis")
+        columns = {c["column_name"]: c for c in DATASETS[data["dataset_uuid"]]["columns"]}
+        if isinstance(x_axis, str) and columns[x_axis]["is_dttm"]:
+            charts.append(data)
+    return charts
+
+
+def test_over_time_charts_have_a_point_per_commit() -> None:
+    # Card #549: one x-value per trunk commit, at its commit time. A time grain
+    # would bucket commits; on a snapshot it would also sum several commits'
+    # states into one value.
+    charts = _over_time()
+    assert sorted(c["external_url"].rsplit("/", 1)[1] for c in charts) == [
+        "average_complexity_by_repo.yaml",
+        "churn.yaml",
+        "churn_by_area.yaml",
+        "complexity_by_area.yaml",
+        "complexity_per_1000_by_repo.yaml",
+        "e2e_scenarios_by_suite.yaml",
+        "functions_over_10_by_repo.yaml",
+        "operations_by_kind.yaml",
+        "size_by_area.yaml",
+        "tile_complexity_per_1000.yaml",
+        "tile_lines.yaml",
+        "tile_test_share.yaml",
+    ]
+    for data in charts:
+        params = data["params"]
+        assert params["x_axis"] == "committed_at", data["slice_name"]
+        assert params["time_grain_sqla"] is None, data["slice_name"]
+    for data in CHARTS.values():
+        assert data["params"].get("x_axis") != "week", data["slice_name"]
+        assert data["params"].get("time_grain_sqla") is None, data["slice_name"]
+
+
+def test_grouped_over_time_charts_drop_empty_series() -> None:
+    # The metric, not a chart filter, picks the measure, so a chart's groups
+    # include other measures' (tokei's languages under `facet`, unsplit rows
+    # under a NULL area) with no value: those series must not be drawn.
+    for data in _over_time():
+        if data["params"].get("groupby"):
+            assert data["params"]["show_empty_columns"] is False, data["slice_name"]
+
+
+def test_snapshot_charts_read_the_commit_snapshot_and_step() -> None:
+    # A snapshot holds until the repo's next commit: drawn as a step that
+    # changes at the commit (`end`), never a slope between commits. Flow
+    # charts read the raw view, one bar per commit.
+    snapshot = _dataset("commit_snapshot")["uuid"]
+    flow = _dataset("current_measurement")["uuid"]
+    for data in _over_time():
+        if data["viz_type"] == "echarts_timeseries_bar":
+            assert data["dataset_uuid"] == flow, data["slice_name"]
+            continue
+        assert data["dataset_uuid"] == snapshot, data["slice_name"]
+        if data["viz_type"] != "big_number":
+            assert data["params"]["seriesType"] == "end", data["slice_name"]
+        else:
+            # A lag counted in points is a number of commits across repos,
+            # not a period: the tiles compare nothing.
+            assert "compare_lag" not in data["params"], data["slice_name"]
+
+
+def test_the_snapshot_dataset_forbids_a_time_grain_in_its_description() -> None:
+    dataset = _dataset("commit_snapshot")
+    assert dataset["main_dttm_col"] == "committed_at"
+    assert "NO time grain" in dataset["description"]
 
 
 def test_commit_filter_drives_only_the_hotspot_table() -> None:
@@ -369,6 +472,54 @@ def test_colours_come_from_the_palette() -> None:
     for data in CHARTS.values():
         if "color_scheme" in data["params"]:
             assert data["params"]["color_scheme"] == "codeVitals"
+
+
+def _bundle_file(kind: str, key: str) -> str:
+    return f"uuid: {key}\nexternal_url: {importer.BUNDLE_URL}{kind}/{key}.yaml\n"
+
+
+def test_bundle_uuids_by_kind() -> None:
+    contents = {
+        "metadata.yaml": "version: 1.0.0\n",
+        "databases/code-vitals.yaml": "uuid: db\n",
+        "datasets/code-vitals/a.yaml": _bundle_file("datasets", "d1"),
+        "charts/a.yaml": _bundle_file("charts", "c1"),
+        "charts/b.yaml": _bundle_file("charts", "c2"),
+        "dashboards/a.yaml": _bundle_file("dashboards", "b1"),
+    }
+    assert importer.bundle_uuids(contents) == {
+        "dashboards": {"b1"},
+        "charts": {"c1", "c2"},
+        "datasets": {"d1"},
+    }
+    assert importer.bundle_uuids(CONTENTS)["datasets"] == set(DATASETS)
+
+
+def test_the_bundle_url_is_every_files_external_url() -> None:
+    for name, data in FILES.items():
+        if name.split("/")[0] in importer.KINDS:
+            assert data["external_url"] == importer.BUNDLE_URL + name, name
+
+
+def test_only_our_imports_are_ours() -> None:
+    ours = importer.BUNDLE_URL + "charts/x.yaml"
+    assert importer.is_ours(True, ours)
+    assert not importer.is_ours(False, ours)
+    assert not importer.is_ours(None, ours)
+    assert not importer.is_ours(True, None)
+    assert not importer.is_ours(True, "https://github.com/someone/else/superset/dashboard/x.yaml")
+
+
+def test_stale_is_what_the_bundle_dropped_of_ours() -> None:
+    ours = importer.BUNDLE_URL + "datasets/code-vitals/x.yaml"
+    found = [
+        ("kept", True, ours),  # still in the bundle
+        ("dropped", True, ours),  # an earlier bundle's, gone from this one
+        ("hand-made", False, None),  # made in Superset
+        ("foreign", True, "https://example.org/other.yaml"),  # another bundle's
+    ]
+    assert importer.stale(found, {"kept"}) == ["dropped"]
+    assert importer.stale(found, {"kept", "dropped"}) == []
 
 
 def test_read_bundle_strips_the_root(tmp_path: Path) -> None:

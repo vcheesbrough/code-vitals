@@ -1,23 +1,52 @@
-table_name: weekly_snapshot
-main_dttm_col: week
-description: Snapshot measures at the end of each week (last value per week, carried forward through weeks
-  without commits). Built on current_measurement.
+table_name: commit_snapshot
+main_dttm_col: committed_at
+description: 'Snapshot measures at every trunk commit: one moment (committed_at) per commit time across
+  all repos, with every repo''s values at its last measured commit at or before it, carried forward. A
+  repo''s series changes only at its own commits and totals across repos never dip. Plot it per commit
+  with NO time grain: a grain sums several commits'' states into one bucket, which is wrong for snapshots.
+  Built on current_measurement.'
 default_endpoint: null
 offset: 0
 cache_timeout: null
 catalog: null
 schema: public
-sql: "-- Snapshot measures at the end of every week: for each repo and each week from\n-- its first measured\
-  \ commit to the current week, every value at the repo's\n-- last measured commit on or before that week.\
-  \ A week without commits\n-- carries the state forward, so totals across repos never dip.\nWITH snapshot\
-  \ AS (\n    SELECT * FROM current_measurement WHERE kind = 'snapshot'\n),\ncommits AS (\n    SELECT\
-  \ DISTINCT repo, sha, committed_at, week FROM snapshot\n),\nweeks AS (\n    SELECT repo,\n         \
-  \  generate_series(min(week), date_trunc('week', now())::date, interval '1 week')::date\n          \
-  \     AS week\n    FROM commits\n    GROUP BY repo\n),\nweek_end AS (\n    SELECT DISTINCT ON (w.repo,\
-  \ w.week) w.repo, w.week, c.sha\n    FROM weeks w\n    JOIN commits c ON c.repo = w.repo AND c.week\
-  \ <= w.week\n    ORDER BY w.repo, w.week, c.committed_at DESC, c.sha DESC\n)\nSELECT e.week, s.repo,\
-  \ s.sha, s.committed_at, s.iteration, s.measure, s.unit, s.area, s.facet,\n       s.value\nFROM week_end\
-  \ e\nJOIN snapshot s ON s.repo = e.repo AND s.sha = e.sha\n"
+sql: |
+  -- Snapshot measures at every trunk commit (card #549). The moments are the
+  -- distinct commit times across all repos. At each moment every repo is at its
+  -- last measured commit at or before it, so its values carry forward until its
+  -- next commit and totals across repos never dip when another repo commits.
+  -- committed_at is the moment, sha and sha_committed_at the commit whose
+  -- state the row is. Linear in moments x repos: each repo's latest commit is
+  -- carried by a running count of its commits, not a join on every earlier one.
+  -- `state` is materialized so the final join is planned on its real size
+  -- (inlined, the planner misjudges it and the query takes ~7x longer).
+  WITH snapshot AS (
+      SELECT repo, sha, committed_at, iteration, measure, unit, area, facet, value
+      FROM current_measurement
+      WHERE kind = 'snapshot'
+  ),
+  commits AS (
+      SELECT DISTINCT ON (repo, committed_at) repo, committed_at, sha
+      FROM snapshot
+      ORDER BY repo, committed_at, sha DESC
+  ),
+  grid AS (
+      SELECT m.committed_at, r.repo, c.sha,
+             count(c.sha) OVER (PARTITION BY r.repo ORDER BY m.committed_at) AS run
+      FROM (SELECT DISTINCT committed_at FROM commits) m
+      CROSS JOIN (SELECT DISTINCT repo FROM commits) r
+      LEFT JOIN commits c ON c.repo = r.repo AND c.committed_at = m.committed_at
+  ),
+  state AS MATERIALIZED (
+      SELECT committed_at, repo,
+             first_value(sha) OVER (PARTITION BY repo, run ORDER BY committed_at) AS sha
+      FROM grid
+      WHERE run > 0
+  )
+  SELECT e.committed_at, s.repo, s.sha, s.committed_at AS sha_committed_at, s.iteration, s.measure,
+         s.unit, s.area, s.facet, s.value
+  FROM state e
+  JOIN snapshot s ON s.repo = e.repo AND s.sha = e.sha
 params: null
 template_params: null
 filter_select_enabled: true
@@ -25,7 +54,7 @@ fetch_values_predicate: null
 extra: null
 normalize_columns: false
 always_filter_main_dttm: false
-uuid: 11cdd17c-a94a-5986-9c81-ff3ecefe7f22
+uuid: 608f9000-5474-5448-a9f7-d31a35f4a348
 metrics:
 - metric_name: lines
   verbose_name: Lines (NLOC)
@@ -139,16 +168,16 @@ metrics:
   extra: null
   warning_text: null
 columns:
-- column_name: week
-  verbose_name: Week
+- column_name: committed_at
+  verbose_name: Committed at
   is_dttm: true
   is_active: true
-  type: DATE
+  type: TIMESTAMP WITH TIME ZONE
   advanced_data_type: null
   groupby: true
   filterable: true
   expression: null
-  description: Monday of the week this row is the end-of-week state of.
+  description: 'The moment: a trunk commit''s time (of any repo). Plot it with no time grain.'
   python_date_format: null
   extra: null
 - column_name: repo
@@ -172,11 +201,11 @@ columns:
   groupby: true
   filterable: true
   expression: null
-  description: null
+  description: The repo's last measured commit at or before committed_at, whose state this row is.
   python_date_format: null
   extra: null
-- column_name: committed_at
-  verbose_name: Committed at
+- column_name: sha_committed_at
+  verbose_name: State committed at
   is_dttm: true
   is_active: true
   type: TIMESTAMP WITH TIME ZONE
@@ -184,7 +213,8 @@ columns:
   groupby: true
   filterable: true
   expression: null
-  description: null
+  description: When the repo's commit this row is the state of (sha) was made; before committed_at when carried
+    forward.
   python_date_format: null
   extra: null
 - column_name: iteration
@@ -262,4 +292,4 @@ columns:
 version: 1.0.0
 database_uuid: ed32a742-6c02-5146-b830-8ca6882e8349
 is_managed_externally: true
-external_url: https://github.com/vcheesbrough/code-vitals/blob/main/superset/dashboard/datasets/code-vitals/weekly_snapshot.yaml
+external_url: https://github.com/vcheesbrough/code-vitals/blob/main/superset/dashboard/datasets/code-vitals/commit_snapshot.yaml

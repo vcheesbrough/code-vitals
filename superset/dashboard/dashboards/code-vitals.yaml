@@ -50,15 +50,17 @@ position:
     children: []
     id: MARKDOWN-intro
     meta:
-      code: '**Snapshot** measures (size, complexity, operations, scenarios) show each repo''s state at
-        the end of each week: its last measured commit on or before that week, carried forward through
-        quiet weeks. **Flow** measures (churn) sum the week''s or the iteration''s commits. Ratios are
-        computed here, never stored. Lines are lizard''s NLOC. Iteration numbers are per repo.
+      code: '**Snapshot** measures (size, complexity, operations, scenarios) have a point at every trunk
+        commit: each repo''s state at its last measured commit at or before it, carried forward until its
+        next one, so a repo''s line steps only at its own commits and totals never dip. **Flow** measures
+        (churn) are a bar per commit, or the sum of an iteration''s commits. Ratios are computed here, never
+        stored. Lines are lizard''s NLOC. Iteration numbers are per repo.
 
 
-        The **Commit** filter picks the moment the Hotspots table shows; the Week range does not apply
-        to it or to Freshness, and Area not to the test share (a ratio across areas). This dashboard is code: edit `superset/dashboard/` in the code-vitals repo
-        — changes made here are replaced on the next deploy.'
+        The **Commit** filter picks the moment the Hotspots table shows; the Commit time range does not
+        apply to it or to Freshness, and Area not to the test share (a ratio across areas). This dashboard
+        is code: edit `superset/dashboard/` in the code-vitals repo — changes made here are replaced on the
+        next deploy.'
       height: 22
       width: 12
     parents:
@@ -451,7 +453,7 @@ metadata:
     targets:
     - column:
         name: repo
-      datasetUuid: 11cdd17c-a94a-5986-9c81-ff3ecefe7f22
+      datasetUuid: bac94bf7-45a3-5c17-8db4-5e0bdb595362
     controlValues: &id001
       enableEmptyFilter: false
       defaultToFirstItem: false
@@ -475,7 +477,7 @@ metadata:
     targets:
     - column:
         name: area
-      datasetUuid: 11cdd17c-a94a-5986-9c81-ff3ecefe7f22
+      datasetUuid: bac94bf7-45a3-5c17-8db4-5e0bdb595362
     controlValues: *id001
     defaultDataMask:
       extraFormData: {}
@@ -490,10 +492,11 @@ metadata:
       - 1
       - 4
     type: NATIVE_FILTER
-  - id: NATIVE_FILTER-week
-    name: Week
+  - id: NATIVE_FILTER-commit-time
+    name: Commit time
     filterType: filter_time
-    description: The range of weeks the charts show (a snapshot week is the state at its end).
+    description: 'The range of commit times the charts show: a point or bar per commit in range; churn
+      per iteration sums the commits in range, lines per iteration shows the iterations that ended in it.'
     targets:
     - {}
     controlValues:
@@ -517,7 +520,7 @@ metadata:
     targets:
     - column:
         name: iteration
-      datasetUuid: 11cdd17c-a94a-5986-9c81-ff3ecefe7f22
+      datasetUuid: bac94bf7-45a3-5c17-8db4-5e0bdb595362
     controlValues:
       enableEmptyFilter: false
       defaultToFirstItem: false

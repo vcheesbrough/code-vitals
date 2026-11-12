@@ -175,6 +175,13 @@ database file, and the connection's URI is set by `set-database-uri`. The
 datasets read only the reader's views; `tests/test_superset_dashboard.py`
 checks that, the references, the filters and the colours, and
 `tests/test_superset_datasets.py` runs the datasets' SQL as the reader.
+A chart with an x-axis queries a row per x-value and group, counted over
+every measure's groups, and Superset cuts a result off at its row limit
+without an error: each deploy's smoke (`code_vitals_dashboard --check`)
+counts those rows for every such chart and fails once one passes 80% of its
+limit (card #552), reporting the closest chart. It runs only when code-vitals
+deploys, while the rows grow with every measured repo's commits, so the 20%
+headroom must cover the growth between two deploys.
 
 | Dataset | What |
 | --- | --- |

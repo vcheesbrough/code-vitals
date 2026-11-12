@@ -44,6 +44,21 @@ class ExtractedTree:
     skipped: int  # entries not written: submodules, unsafe paths, links leaving the tree
 
 
+def clone_from(url: str, dest: Path) -> "Clone":
+    """A full clone of `url` (every branch and tag) at `dest`, without a
+    working tree: the collector reads git objects only."""
+    with obs.git_span("clone"):
+        result = subprocess.run(
+            ["git", "clone", "--quiet", "--no-checkout", url, str(dest)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    if result.returncode != 0:
+        raise GitError(f"git clone of {url} failed: {result.stderr.strip()}")
+    return Clone(dest)
+
+
 class Clone:
     def __init__(self, path: Path) -> None:
         self.path = path

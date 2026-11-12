@@ -23,3 +23,14 @@ def test_version_prints_version_and_revision(
 def test_no_arguments_prints_help(capsys: pytest.CaptureFixture[str]) -> None:
     assert cli.main([]) == 0
     assert "usage: code-vitals" in capsys.readouterr().out
+
+
+def test_collect_takes_a_clone_or_fetch_but_not_both(capsys: pytest.CaptureFixture[str]) -> None:
+    for argv in (
+        ["collect", "--repo", "bored"],
+        ["collect", "--repo", "bored", "--clone", "/x", "--fetch"],
+    ):
+        with pytest.raises(SystemExit) as exit_info:
+            cli.main(argv, {cli.DATABASE_URL_ENV: "postgresql://unused"})
+        assert exit_info.value.code == 2
+    assert "one of the arguments --clone --fetch is required" in capsys.readouterr().err

@@ -24,6 +24,7 @@ A run row exists from the moment the repo is known, so every failure after
 that — a bad clone, a changed measure definition — is recorded too.
 """
 
+import contextlib
 import logging
 import tempfile
 import time
@@ -39,7 +40,7 @@ from psycopg.types.json import Jsonb
 from code_vitals import obs
 from code_vitals.areas import AreaRuleset
 from code_vitals.build_info import BuildInfo
-from code_vitals.gitrepo import Clone
+from code_vitals.gitrepo import Clone, clone_from
 from code_vitals.measures import CommitContext, FunctionRow, Measure, Value, registered
 from code_vitals.repos import RepoConfig, iteration_of, pr_number_of, version_from
 
@@ -76,15 +77,17 @@ class RunResult:
 def collect(
     conninfo: str,
     repo: RepoConfig,
-    clone_path: Path,
+    clone_path: Path | None,
     trigger: obs.Trigger,
     build: BuildInfo,
     *,
     measures: Sequence[Measure] | None = None,
     pipeline_number: str | None = None,
 ) -> RunResult:
-    """Catch the repo up. Returns the run's result; raises only for failures
-    that stop the whole run (after recording them on the run row)."""
+    """Catch the repo up from the clone at `clone_path`, or, when it is None,
+    from a fresh clone of the repo's URL (deleted afterwards). Returns the
+    run's result; raises only for failures that stop the whole run (after
+    recording them on the run row — a failed clone included)."""
     measures = registered() if measures is None else list(measures)
     started = time.monotonic()
     outcome = obs.Outcome.FAILURE
@@ -99,24 +102,10 @@ def collect(
             repo_id = _ensure_repo(conn, repo)
             run_id = _start_run(conn, repo_id, trigger, build, span)
             try:
-                clone = Clone(clone_path)
-                head = clone.resolve_trunk(repo.trunk)
-                span.set_attribute(obs.HEAD_SHA, head)
-                measure_ids, starts = _sync_measures(conn, measures)
-                ruleset = _sync_ruleset(conn, repo_id, repo.areas)
-                with _RepoLock(conn, repo.name):
-                    result = _catch_up(
-                        conn,
-                        clone,
-                        repo,
-                        repo_id,
-                        run_id,
-                        head,
-                        measures,
-                        measure_ids,
-                        starts,
-                        ruleset,
-                        trigger,
+                with contextlib.ExitStack() as fetched:
+                    clone = _open_clone(repo, clone_path, fetched)
+                    result = _collect_from(
+                        conn, clone, repo, repo_id, run_id, measures, trigger, span
                     )
             except Exception:
                 log.exception("collect failed for %s", repo.name)
@@ -131,6 +120,45 @@ def collect(
             labels = {obs.OUTCOME: str(outcome), obs.TRIGGER: str(trigger)}
             obs.RUNS.add(1, labels)
             obs.RUN_DURATION.record(time.monotonic() - started, labels)
+
+
+def _open_clone(repo: RepoConfig, clone_path: Path | None, stack: contextlib.ExitStack) -> Clone:
+    if clone_path is not None:
+        return Clone(clone_path)
+    if repo.url is None:
+        raise ValueError(f"{repo.name} has no URL to fetch from")
+    tmp = stack.enter_context(tempfile.TemporaryDirectory(prefix="code-vitals-clone-"))
+    return clone_from(repo.url, Path(tmp) / repo.name)
+
+
+def _collect_from(
+    conn: Conn,
+    clone: Clone,
+    repo: RepoConfig,
+    repo_id: int,
+    run_id: int,
+    measures: Sequence[Measure],
+    trigger: obs.Trigger,
+    span: trace.Span,
+) -> RunResult:
+    head = clone.resolve_trunk(repo.trunk)
+    span.set_attribute(obs.HEAD_SHA, head)
+    measure_ids, starts = _sync_measures(conn, measures)
+    ruleset = _sync_ruleset(conn, repo_id, repo.areas)
+    with _RepoLock(conn, repo.name):
+        return _catch_up(
+            conn,
+            clone,
+            repo,
+            repo_id,
+            run_id,
+            head,
+            measures,
+            measure_ids,
+            starts,
+            ruleset,
+            trigger,
+        )
 
 
 def _ensure_repo(conn: Conn, repo: RepoConfig) -> int:

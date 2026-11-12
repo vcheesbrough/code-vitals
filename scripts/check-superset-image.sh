@@ -7,7 +7,8 @@
 #     the dev groups to Alpha/Admin and using our security manager;
 #   - the private FAB helper the sign-in relies on still exists;
 #   - it refuses to load when a required variable is missing;
-#   - the dashboard bundle and its importer are there (card #500).
+#   - the dashboard bundle and its importer are there (card #500), and the
+#     Superset models and columns its stale-object removal reads (card #549).
 #
 # Usage: check-superset-image.sh <image-ref>
 set -eu
@@ -60,6 +61,15 @@ for kind, function in [
     source = (package / "commands" / kind / "importers" / "v1" / "utils.py").read_text()
     signature = re.search(r"def " + function + r"\((.*?)\)\s*->", source, re.S)
     assert signature and "ignore_permissions" in signature[1], function
+# Removing what the bundle dropped (card #549) reads these models and columns.
+for path, needles in [
+    ("models/dashboard.py", ["class Dashboard(", "dashboard_slices = Table(", "is_managed_externally = Column", "external_url = Column"]),
+    ("models/slice.py", ["class Slice(", "datasource_id = Column", "datasource_type = Column", "is_managed_externally = Column", "external_url = Column"]),
+    ("connectors/sqla/models.py", ["class SqlaTable(", "is_managed_externally = Column", "external_url = Column"]),
+]:
+    source = (package / path).read_text()
+    for needle in needles:
+        assert needle in source, (path, needle)
 print(f"dashboard bundle ok ({len(contents)} files)")
 ' 2>&1) || { echo "$out" >&2; echo "ERROR: the dashboard bundle or its importer is broken" >&2; exit 1; }
 echo "  $out"

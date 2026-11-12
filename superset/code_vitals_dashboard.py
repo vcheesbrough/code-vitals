@@ -13,9 +13,9 @@ so a deleted or edited dashboard is restored by the next deploy. Whatever an
 earlier bundle imported and this one no longer has (a removed chart or
 dataset, card #549) is deleted in the same transaction, so Superset holds
 exactly the bundle: an import is identified as ours by being managed
-externally with an external_url into this repo's bundle. A removed dataset
-that a chart made in Superset still uses is kept (deleting it would break that
-chart) and reported. It never
+externally with an external_url into this repo's bundle. A removed chart on a
+dashboard made in Superset, or a removed dataset a chart made there still
+uses, is kept (deleting it would break that dashboard or chart) and reported. It never
 imports the database file: the connection belongs to `set-database-uri`,
 which alone knows the reader's password. The database file only names that
 connection; the import gives the existing connection the file's UUID (the
@@ -90,18 +90,40 @@ def stale(found: list[tuple[str, bool | None, str | None]], wanted: set[str]) ->
     )
 
 
+def split_stale(
+    candidates: list[tuple[str, list[str]]], removed: set[str]
+) -> tuple[list[str], list[str]]:
+    """Split stale objects of one kind — (key, keys of what uses it) — into
+    those to delete and those to keep. One is kept while anything not being
+    removed still uses it: a chart on a dashboard made in Superset, a dataset
+    of a chart made there (or of a chart kept for that reason). `removed`
+    holds what is already being deleted (callers go dashboards, then charts,
+    then datasets) and gains what this call deletes."""
+    remove: list[str] = []
+    keep: list[str] = []
+    for key, users in candidates:
+        if all(user in removed for user in users):
+            remove.append(key)
+            removed.add(key)
+        else:
+            keep.append(key)
+    return remove, keep
+
+
 def _stale_objects(contents: dict[str, str]) -> tuple[list[Any], list[Any]]:
     """What an earlier bundle imported and this one no longer has, in deletion
-    order, and the stale datasets kept because a chart that is not ours
-    still uses them. Needs an app context."""
+    order, and what of it is kept because something made in Superset still
+    uses it (split_stale). Needs an app context."""
+    from sqlalchemy.sql import select
     from superset.connectors.sqla.models import SqlaTable
-    from superset.models.dashboard import Dashboard
+    from superset.models.dashboard import Dashboard, dashboard_slices
     from superset.models.slice import Slice
 
     from superset import db
 
     models = {"dashboards": Dashboard, "charts": Slice, "datasets": SqlaTable}
     wanted = bundle_uuids(contents)
+    removed: set[str] = set()
     remove: list[Any] = []
     kept: list[Any] = []
     for kind in KINDS:
@@ -109,19 +131,30 @@ def _stale_objects(contents: dict[str, str]) -> tuple[list[Any], list[Any]]:
         rows = db.session.query(model).filter(model.is_managed_externally.is_(True)).all()
         found = [(str(row.uuid), row.is_managed_externally, row.external_url) for row in rows]
         old = set(stale(found, wanted[kind]))
+        candidates: dict[str, Any] = {}
+        uses: list[tuple[str, list[str]]] = []
         for row in rows:
             if str(row.uuid) not in old:
                 continue
-            if kind == "datasets":
-                users = (
-                    db.session.query(Slice)
-                    .filter(Slice.datasource_type == "table", Slice.datasource_id == row.id)
-                    .all()
+            key = f"{kind}:{row.id}"
+            candidates[key] = row
+            if kind == "charts":
+                # The table, not the relationship: the import rewrote it above.
+                query = select(dashboard_slices.c.dashboard_id).where(
+                    dashboard_slices.c.slice_id == row.id
                 )
-                if any(chart not in remove for chart in users):
-                    kept.append(row)
-                    continue
-            remove.append(row)
+                users = [f"dashboards:{i}" for i in db.session.execute(query).scalars()]
+            elif kind == "datasets":
+                charts = db.session.query(Slice.id).filter(
+                    Slice.datasource_type == "table", Slice.datasource_id == row.id
+                )
+                users = [f"charts:{i}" for (i,) in charts]
+            else:
+                users = []
+            uses.append((key, users))
+        delete, keep = split_stale(uses, removed)
+        remove.extend(candidates[k] for k in delete)
+        kept.extend(candidates[k] for k in keep)
     return remove, kept
 
 
@@ -326,7 +359,7 @@ def main(argv: list[str]) -> int:
     )
     print("removed (no longer in the bundle): " + (", ".join(counts["removed"]) or "nothing"))
     for name in counts["kept"]:
-        print(f"kept although no longer in the bundle, a chart made in Superset uses it: {name}")
+        print(f"kept although no longer in the bundle, something made in Superset uses it: {name}")
     return 0
 
 

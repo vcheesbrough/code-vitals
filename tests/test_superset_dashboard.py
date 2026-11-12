@@ -398,6 +398,17 @@ def test_grouped_over_time_charts_drop_empty_series() -> None:
             assert data["params"]["show_empty_columns"] is False, data["slice_name"]
 
 
+def test_grouped_over_time_charts_query_up_to_supersets_row_cap() -> None:
+    # A grouped query returns a row per (commit time, group) over every
+    # snapshot measure's groups (the metric picks the measure, the empty ones
+    # are dropped after the query), ~24 facets per commit today: the limit is
+    # Superset's cap (ROW_LIMIT, 50,000) so it is not reached for years, not
+    # the 10,000 that ~420 commits would fill.
+    for data in _over_time():
+        if data["params"].get("groupby"):
+            assert data["params"]["row_limit"] == 50000, data["slice_name"]
+
+
 def test_snapshot_charts_read_the_commit_snapshot_and_step() -> None:
     # A snapshot holds until the repo's next commit: drawn as a step that
     # changes at the commit (`end`), never a slope between commits. Flow
@@ -520,6 +531,33 @@ def test_stale_is_what_the_bundle_dropped_of_ours() -> None:
     ]
     assert importer.stale(found, {"kept"}) == ["dropped"]
     assert importer.stale(found, {"kept", "dropped"}) == []
+
+
+def test_split_stale_deletes_only_what_nothing_kept_uses() -> None:
+    removed = {"dashboards:1"}  # our dashboard, dropped from the bundle
+    charts = [
+        ("charts:10", []),  # on no dashboard
+        ("charts:11", ["dashboards:1"]),  # only on our dropped dashboard
+        ("charts:12", ["dashboards:1", "dashboards:2"]),  # also on a hand-made one
+    ]
+    assert importer.split_stale(charts, removed) == (["charts:10", "charts:11"], ["charts:12"])
+    datasets = [
+        ("datasets:20", ["charts:10", "charts:11"]),  # only our deleted charts
+        ("datasets:21", ["charts:12"]),  # a kept chart
+        ("datasets:22", ["charts:99"]),  # a chart made in Superset
+        ("datasets:23", []),
+    ]
+    assert importer.split_stale(datasets, removed) == (
+        ["datasets:20", "datasets:23"],
+        ["datasets:21", "datasets:22"],
+    )
+    assert removed == {
+        "dashboards:1",
+        "charts:10",
+        "charts:11",
+        "datasets:20",
+        "datasets:23",
+    }
 
 
 def test_read_bundle_strips_the_root(tmp_path: Path) -> None:

@@ -16,7 +16,7 @@ params:
   show_legend: true
   legendType: scroll
   legendOrientation: top
-  row_limit: 10000
+  row_limit: 50000
   truncate_metric: true
   show_empty_columns: false
   comparison_type: values

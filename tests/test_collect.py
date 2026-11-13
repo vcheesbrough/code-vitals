@@ -683,8 +683,14 @@ def test_a_second_repo_of_the_same_name_is_refused(db: tuple[str, str], repo: Fi
         FIXTURE.name, "dev", FIXTURE.version_sources, url="https://x.example/fork.git"
     )
 
-    with pytest.raises(RepoNameConflict, match=f"already registered from {repo.path}"):
+    with pytest.raises(RepoNameConflict) as refused:
         collect(writer, fork, repo.path, Trigger.PUSH, BUILD, measures=ONLY_FILES)
+    assert f"already registered from {repo.path}" in str(refused.value)
+    # The step log says how to recover when the repo really moved.
+    assert (
+        "If the repo itself moved, as the database owner run `UPDATE repo SET url ="
+        " 'https://x.example/fork.git' WHERE name = 'fixture'`, then re-run"
+    ) in str(refused.value)
 
     assert _rows(owner, "SELECT name, trunk, url FROM repo") == before
     # Nothing recorded for the newcomer: no run on the existing repo's row.

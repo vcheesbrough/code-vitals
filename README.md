@@ -94,7 +94,8 @@ validates the settings (`src/code_vitals/settings.py`; an unknown or invalid
 setting fails the step with a message naming it), then starts the
 collector on code-vitals' prod network through the socket. The first run
 registers the repo under its name and URL (a second repo of the same name
-from another URL is refused) and measures its whole history. Every
+from another URL is refused; if the repo itself moved, the database owner
+updates `repo.url`, as the error says) and measures its whole history. Every
 deployment then re-measures it from the same settings, read from that file at
 its trunk head; a repo whose file has no plugin step is skipped. The
 operations and e2e-suite rules of the `functionality` measures are still per

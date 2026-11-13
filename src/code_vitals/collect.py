@@ -187,10 +187,13 @@ def _ensure_repo(conn: Conn, repo: RepoConfig) -> int:
         ).fetchone()
         if row is None:
             recorded = conn.execute("SELECT url FROM repo WHERE name = %s", (repo.name,)).fetchone()
+            # The writer cannot change a recorded URL; a repo that really moved
+            # (transferred, new forge) is re-pointed by the owner, once.
             raise RepoNameConflict(
                 f"a repo named {repo.name} is already registered from"
                 f" {recorded[0] if recorded else '?'}; refusing to record {repo.url} under that"
-                " name"
+                " name. If the repo itself moved, as the database owner run"
+                f" `UPDATE repo SET url = '{repo.url}' WHERE name = '{repo.name}'`, then re-run"
             )
     return int(str(row[0]))
 

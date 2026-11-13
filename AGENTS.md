@@ -117,7 +117,11 @@ Two environments on mini, each its own compose project of `deploy/compose.yaml`:
   sources and area rules live in that step's `settings:`, validated by
   `src/code_vitals/settings.py` (shared by the plugin and the collector). A
   repo registers under its short name (`CI_REPO_NAME`); a second repo of the
-  same name from another URL is refused, never merged into the first.
+  same name from another URL is refused, never merged into the first. If a
+  repo really moved (transferred, new forge), its step fails with that
+  refusal until the owner re-points it once:
+  `UPDATE repo SET url = '<new clone URL>' WHERE name = '<repo>'` (the
+  writer cannot); the error message gives the exact statement.
   Only the `functionality` measures' operations/e2e-suite rules stay keyed by
   repo name in `src/code_vitals/measures/functionality.py` (moving them would
   change those measures' definitions).

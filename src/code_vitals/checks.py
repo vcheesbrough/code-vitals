@@ -1,16 +1,18 @@
 """What a deployment checks after its collect steps; any problem fails it.
 
 - check_repo, per repo with the clone just collected: a second catch-up finds
-  nothing to do, and the values recorded at a few fixed commits are exactly
-  those in expected_values.toml. Commits never change, so neither may their
+  nothing to do, the repo's area ruleset is complete, and the values recorded
+  at a few fixed commits are exactly those in expected_values.toml (a repo
+  with no entry there has no fixed values to check). Commits never change, so neither may their
   values: a change that alters them bumps the measure's version, and the same
   PR updates the table, so every change in numbers is reviewed.
   Non-recomputable measures are not in the table (fixed_value_measures).
 - check_status, once every repo is collected: every version this build
-  registers is `complete` (so the views show it), and every repo's last run
-  succeeded.
+  registers is `complete` (so the views show it), and the last run of every
+  repo collected succeeded.
 """
 
+import logging
 import tomllib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -24,6 +26,8 @@ from code_vitals.build_info import BuildInfo
 from code_vitals.collect import collect
 from code_vitals.measures import Measure, registered
 from code_vitals.repos import RepoConfig
+
+log = logging.getLogger("code_vitals.checks")
 
 # Floats from SQL and from the table: equal to well within any display.
 TOLERANCE = 1e-9
@@ -103,8 +107,26 @@ def check_repo(
             f"a second catch-up of {repo.name} had {again.backlog} commit(s) to do"
             f" ({again.outcome}, run {again.run_id})"
         )
-    problems += _check_values(conninfo, repo, measures, expected.get(repo.name))
+    problems += _check_ruleset(conninfo, repo)
+    entry = expected.get(repo.name)
+    if entry is None:
+        log.info("expected_values.toml has no fixed commits for %s; values not checked", repo.name)
+    else:
+        problems += _check_values(conninfo, repo, measures, entry)
     return problems
+
+
+def _check_ruleset(conninfo: str, repo: RepoConfig) -> list[str]:
+    with psycopg.connect(conninfo) as conn:
+        row = conn.execute(
+            "SELECT rs.status::text FROM area_ruleset rs JOIN repo r ON r.id = rs.repo_id"
+            " WHERE r.name = %s AND rs.version = %s",
+            (repo.name, repo.areas.version),
+        ).fetchone()
+    state = "not registered" if row is None else str(row[0])
+    if state == "complete":
+        return []
+    return [f"{repo.name}'s area ruleset v{repo.areas.version} is {state}, not complete"]
 
 
 def fixed_value_measures(measures: Sequence[Measure]) -> list[Measure]:
@@ -119,10 +141,10 @@ def _check_values(
     conninfo: str,
     repo: RepoConfig,
     measures: Sequence[Measure],
-    expected: ExpectedRepo | None,
+    expected: ExpectedRepo,
 ) -> list[str]:
-    if expected is None or not expected.commits:
-        return [f"expected_values.toml has no fixed commits for {repo.name}"]
+    if not expected.commits:
+        return [f"expected_values.toml has an entry for {repo.name} but no fixed commits"]
     problems = []
     if expected.ruleset != repo.areas.version:
         problems.append(
@@ -227,11 +249,12 @@ def render(
 
 def check_status(
     conninfo: str,
-    repos: Sequence[RepoConfig],
+    repos: Sequence[str],
     *,
     measures: Sequence[Measure] | None = None,
 ) -> list[str]:
-    """Problems with what every repo's collect left behind; empty when none."""
+    """Problems with what the named repos' collects left behind; empty when
+    none. A repo the deployment skipped (no plugin step) is not named."""
     measures = registered() if measures is None else list(measures)
     problems = []
     with psycopg.connect(conninfo) as conn:
@@ -245,24 +268,14 @@ def check_status(
             state = status.get((m.name, m.version), "not registered")
             if state != "complete":
                 problems.append(f"measure {m.name} v{m.version} is {state}, not complete")
-        for repo in repos:
-            ruleset = conn.execute(
-                "SELECT rs.status::text FROM area_ruleset rs JOIN repo r ON r.id = rs.repo_id"
-                " WHERE r.name = %s AND rs.version = %s",
-                (repo.name, repo.areas.version),
-            ).fetchone()
-            state = "not registered" if ruleset is None else str(ruleset[0])
-            if state != "complete":
-                problems.append(
-                    f"{repo.name}'s area ruleset v{repo.areas.version} is {state}, not complete"
-                )
+        for name in repos:
             last = conn.execute(
                 "SELECT run.id, run.outcome::text FROM run JOIN repo r ON r.id = run.repo_id"
                 " WHERE r.name = %s ORDER BY run.started_at DESC, run.id DESC LIMIT 1",
-                (repo.name,),
+                (name,),
             ).fetchone()
             if last is None:
-                problems.append(f"{repo.name} has no collector run")
+                problems.append(f"{name} has no collector run")
             elif last[1] != "success":
-                problems.append(f"{repo.name}'s last run ({last[0]}) is {last[1]}")
+                problems.append(f"{name}'s last run ({last[0]}) is {last[1]}")
     return problems

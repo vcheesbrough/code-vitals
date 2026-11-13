@@ -4,7 +4,7 @@
 # and published for this commit and never rebuilds (bored card #254).
 #
 #   (find-commit-tag → verify-image ∥ apply-authentik-blueprint) → deploy
-#     → (smoke ∥ collect-<repo> ×3 → check) → tag-release
+#     → (smoke ∥ collect → check) → tag-release
 #
 # deploy-prod.yml is the same flow for prod, which only `main` may deploy;
 # tests/test_pipelines.py pins both gates. The steps are kept identical apart
@@ -84,6 +84,13 @@ steps:
         ./scripts/check-image-metadata.sh "$$SUPERSET" "$$RELEASE_TAG" "$$CI_COMMIT_SHA"
         docker image inspect -f '{{ index .RepoDigests 0 }}' "$$SUPERSET" > .deploy-superset-image
         echo "deploying $$(cat .deploy-superset-image)"
+        # The build's Woodpecker plugin (card #564), published under the same
+        # version; prod moves its stable tag to this digest (promote-stable).
+        PLUGIN=registry.desync.link/code-vitals-plugin:$$RELEASE_TAG
+        docker pull "$$PLUGIN"
+        ./scripts/check-image-metadata.sh "$$PLUGIN" "$$RELEASE_TAG" "$$CI_COMMIT_SHA"
+        docker image inspect -f '{{ index .RepoDigests 0 }}' "$$PLUGIN" > .deploy-plugin-image
+        echo "plugin $$(cat .deploy-plugin-image)"
 
   deploy:
     # Postgres up; dev's database recreated from a fresh dump of prod; then the
@@ -128,13 +135,16 @@ steps:
       - apk add --no-cache curl
       - ./scripts/smoke-superset.sh dev
 
-  collect-v-note:
-    # The deployed image, by digest, catches each measured repo up with
-    # trigger=backfill and checks it (scripts/run-collector.sh, card #497): a
-    # bumped measure version or area ruleset is recomputed over the whole
-    # history here — in dev from the branch, in prod on release — and the
-    # values at the fixed commits of src/code_vitals/expected_values.toml must
-    # match. One step per repo, in parallel.
+  collect:
+    # Every repo registered in the database, in parallel, with the deployed
+    # image by digest (scripts/run-collector.sh, cards #497 and #564): each is
+    # cloned, its plugin settings read from its own
+    # .woodpecker/code-vitals.yml at the trunk head, caught up with
+    # trigger=backfill and checked, so a bumped measure version or area
+    # ruleset is recomputed over the whole history here — in dev from the
+    # branch, in prod on release — and the values at the fixed commits of
+    # src/code_vitals/expected_values.toml must match. A repo without the
+    # plugin step is skipped, not failed.
     depends_on:
       - deploy
     image: *docker-image
@@ -144,36 +154,15 @@ steps:
       CODE_VITALS_WRITER_PASSWORD: *writer-password
     commands:
       - *docker-login
-      - ./scripts/run-collector.sh dev "$$(cat .deploy-image)" repo v-note
-
-  collect-bored:
-    depends_on:
-      - deploy
-    image: *docker-image
-    volumes: *docker-socket
-    environment: *collect-env
-    commands:
-      - *docker-login
-      - ./scripts/run-collector.sh dev "$$(cat .deploy-image)" repo bored
-
-  collect-sovereign-config:
-    depends_on:
-      - deploy
-    image: *docker-image
-    volumes: *docker-socket
-    environment: *collect-env
-    commands:
-      - *docker-login
-      - ./scripts/run-collector.sh dev "$$(cat .deploy-image)" repo sovereign-config
+      - ./scripts/run-collector.sh dev "$$(cat .deploy-image)" repos
 
   check:
     # Once every repo is collected: every version this build registers is
-    # complete, so the views read it, and every repo's last run succeeded. A
-    # failure fails the deployment before tag-release.
+    # complete, so the views read it, and the last run of every repo the
+    # collect step did not skip succeeded. A failure fails the deployment
+    # before tag-release.
     depends_on:
-      - collect-v-note
-      - collect-bored
-      - collect-sovereign-config
+      - collect
     image: *docker-image
     volumes: *docker-socket
     environment: *collect-env

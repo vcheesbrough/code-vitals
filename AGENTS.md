@@ -97,14 +97,25 @@ Two environments on mini, each its own compose project of `deploy/compose.yaml`:
 | Authentik application / groups | `code-vitals-dev` / `code-vitals-dev-users`, `-admins` | `code-vitals` / `code-vitals-users`, `-admins` |
 | Deployed by | Woodpecker *Deploy*, target `dev`, **any branch** (`.woodpecker/deploy-dev.yml`) | target `prod`, **`main` only**, gated in `when:` (`.woodpecker/deploy-prod.yml`) |
 
-- **Every deployment collects and checks** (card #497): after migrate, one
-  step per measured repo runs the deployed image by digest
-  (`scripts/run-collector.sh`: clone, `collect --trigger backfill`,
-  `check-repo`), then `check` runs `check-status`; `tag-release` waits on it.
-  A measure or ruleset bump therefore backfills in dev from the branch and in
+- **Every deployment collects and checks** (cards #497, #564): after
+  migrate, the `collect` step runs the deployed image by digest over every
+  repo in the database's `repo` table, in parallel, one container each
+  (`scripts/run-collector.sh`: `list-repos`, then `backfill-repo` — clone,
+  read the repo's plugin settings from its `.woodpecker/code-vitals.yml` at
+  the trunk head, `collect --trigger backfill`, check). A repo without the
+  plugin step is skipped with a log line, not failed. Then `check` runs
+  `check-status` over the repos collected; `tag-release` waits on it. A
+  measure or ruleset bump therefore backfills in dev from the branch and in
   prod on release, and must update `src/code_vitals/expected_values.toml` in
-  the same PR. Only prod moves `:stable`, in `promote-stable`, after
-  `tag-release`.
+  the same PR (for the repos pinned there). Only prod moves `:stable` (the
+  plugin's and the collector's), in `promote-stable`, after `tag-release`.
+- **No central repo list.** A repo onboards itself with one plugin step (README
+  § Measuring a repo) and registers on its first run; its trunk, version
+  sources and area rules live in that step's `settings:`, validated by
+  `src/code_vitals/settings.py` (shared by the plugin and the collector).
+  Only the `functionality` measures' operations/e2e-suite rules stay keyed by
+  repo name in `src/code_vitals/measures/functionality.py` (moving them would
+  change those measures' definitions).
 - **A push never deploys.** A deployment promotes the image the push already
   published (resolved through the commit, then used by digest) and never
   rebuilds. The git tag is pushed only after it succeeds.
@@ -210,28 +221,32 @@ core, not saved for the `1.0.0` card, which is only the sign-off.
   for different repos. The repo is stable and bounded, and runs per repo are
   serialized by an advisory lock.
 
-- **Moving collector tag in other repos.** The code-vitals workflow in
-  v-note, bored and sovereign-config runs
-  `registry.desync.link/code-vitals-collector:stable` (`docker create --pull
-  always`, through the socket) in a step with `failure: ignore`, not a pinned
-  digest. Approved because the step can never block a build, writes are
-  idempotent, and catch-up refills any missed run — while pinning would need
-  three cross-repo PRs per new measure. The image bakes in its version and
-  revision and records them with every run, and only a prod deployment whose
-  checks passed moves `:stable`. **Every other image stays pinned by
-  digest** (the step's own `docker` CLI image included). Each such workflow
-  carries a comment pointing here.
-  - The workflow is `deploy/measured-repo-workflow.yml` here, copied with
-    `__REPO__`/`__TRUNK__` replaced to `.woodpecker/code-vitals.yml` in each
-    measured repo (card #498); `tests/test_measured_repo_workflow.py` pins it.
-    It skips Woodpecker's clone: `collect --fetch` clones the public repo
-    inside the container (full history, tags), so the workflow needs no
-    clone override and later changes ship through `:stable` alone.
-  - **Secret:** the measured repo's pipelines see only their own broker layer
+- **Moving plugin tag in other repos.** A measured repo's code-vitals
+  step runs `registry.desync.link/code-vitals-plugin:stable` with `failure:
+  ignore`, not a pinned digest. Approved because the step can never block a
+  build, writes are idempotent, and catch-up refills any missed run — while
+  pinning would need a cross-repo PR per measured repo for every new measure.
+  The plugin starts the collector of its own version (by version tag, which
+  is never republished), both images bake in their version and revision, the
+  collector records them with every run, and only a prod deployment whose
+  checks passed moves either `:stable`. **Every other image stays pinned by
+  digest.** Each such step carries a comment pointing here.
+  - The step is a plugin (card #564), replacing the shell template copied
+    into each repo (card #498): the plugin validates the settings and starts
+    the collector through the socket, on `code-vitals_default` and
+    `proxy-backend` (a plugin step's own network reaches neither Postgres nor
+    the OTLP collector). The collector clones the public repo itself
+    (`collect --fetch`, full history and tags), so the step needs no clone
+    (`skip_clone: true`) and later changes ship through `:stable` alone. It
+    mounts the docker socket, so the measured repo must be trusted in
+    Woodpecker — as it had to be for the template.
+  - **Secret:** a measured repo's pipelines see only their own broker layer
     plus `/woodpecker/shared`, so `code_vitals_prod_writer_password` is a
-    sovereign-config **alias** from this repo's layer into each measured
-    repo's (`/woodpecker/repos/vcheesbrough/<repo>/`) — one value, rotated
-    once. It is the writer, so a measured repo's pipeline could write any
-    repo's rows; the same trust assumption as above (only the owner pushes)
-    covers it. The OTLP settings are not secret and are written in the
-    workflow.
+    sovereign-config **alias** of this repo's value in
+    `/woodpecker/shared/` (in place since 2026-11-13, beside the older
+    per-repo aliases under v-note and sovereign-config; all one value, rotated
+    once). A new repo therefore needs no broker change. Every repo's pipelines
+    can read it, and it is the writer, so any repo's pipeline could write any
+    repo's rows; the same trust assumption as above (only the owner pushes,
+    to every repo on this Woodpecker) covers it. The OTLP settings are not
+    secret and are fixed in the plugin.

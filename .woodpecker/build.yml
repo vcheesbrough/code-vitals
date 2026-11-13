@@ -1,5 +1,5 @@
 # Push/manual: (compute-version ∥ prune-build-cache) → build (local, no push) → check-superset-import → publish-image
-#   build builds the image and runs every test inside it (the Dockerfile's test stage), then checks its labels and
+#   build builds the images (collector, Superset, plugin) and runs every test inside the collector's (the Dockerfile's test stage), then checks its labels and
 #   tools; check-superset-import tests the dashboard import in the Superset image it built; publish-image pushes to
 #   the registry ONLY after both, so the registry holds tested images only.
 #   A push never deploys. Deployments (a later card) promote an image a push already published and never rebuild
@@ -91,6 +91,25 @@ steps:
           -t "$$SUPERSET" .
         ./scripts/check-image-metadata.sh "$$SUPERSET" "$$RELEASE_TAG" "$$CI_COMMIT_SHA"
         ./scripts/check-superset-image.sh "$$SUPERSET"
+      # The Woodpecker plugin (card #564): the collector just built plus the
+      # docker CLI, under the same version. It starts the collector of its own
+      # version, so the two are published and promoted together.
+      - |
+        RELEASE_TAG=$$(cat .release-tag)
+        CREATED=$$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        IMAGE=registry.desync.link/code-vitals-collector:$$RELEASE_TAG
+        PLUGIN=registry.desync.link/code-vitals-plugin:$$RELEASE_TAG
+        docker build \
+          --progress=plain \
+          -f plugin/Dockerfile \
+          --build-arg COLLECTOR_IMAGE="$$IMAGE" \
+          --build-arg COLLECTOR_ID="$$(docker image inspect -f '{{.Id}}' "$$IMAGE")" \
+          --label org.opencontainers.image.version="$$RELEASE_TAG" \
+          --label org.opencontainers.image.revision="$$CI_COMMIT_SHA" \
+          --label org.opencontainers.image.created="$$CREATED" \
+          -t "$$PLUGIN" .
+        ./scripts/check-image-metadata.sh "$$PLUGIN" "$$RELEASE_TAG" "$$CI_COMMIT_SHA"
+        ./scripts/check-plugin-image.sh "$$PLUGIN" "$$RELEASE_TAG"
 
   check-superset-import:
     # The dashboard import against the real Superset (card #548): the Superset
@@ -127,8 +146,9 @@ steps:
       # Refuses to overwrite an existing version (pipeline numbers repeat if
       # the repo is re-created in Woodpecker), then pushes :<version> and the
       # same image as :commit-<sha> for deployments to find.
-      # The Superset image first: the collector's :commit-<sha> is what a
-      # deployment resolves the build through, so it must appear last, once
-      # both images of the build are in the registry.
+      # The Superset and plugin images first: the collector's :commit-<sha>
+      # is what a deployment resolves the build through, so it must appear
+      # last, once every image of the build is in the registry.
       - IMAGE_REPO=registry.desync.link/code-vitals-superset ./scripts/publish-release-image.sh "$$(cat .release-tag)" "$$CI_COMMIT_SHA"
+      - IMAGE_REPO=registry.desync.link/code-vitals-plugin ./scripts/publish-release-image.sh "$$(cat .release-tag)" "$$CI_COMMIT_SHA"
       - ./scripts/publish-release-image.sh "$$(cat .release-tag)" "$$CI_COMMIT_SHA"

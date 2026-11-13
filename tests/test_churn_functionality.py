@@ -11,9 +11,9 @@ from code_vitals.gitrepo import Clone
 from code_vitals.measures import CommitContext, Value
 from code_vitals.measures.churn import FilesChanged, LinesAdded, LinesDeleted
 from code_vitals.measures.functionality import E2eScenarios, Operations
-from code_vitals.repos import REPOS
 
 from .gitfixture import make_repo
+from .measured_repos import MEASURED
 
 RULES = ruleset(1, ("app/**", "app"))
 
@@ -55,7 +55,7 @@ def _tree_context(tmp_path: Path, repo: str, files: dict[str, str]) -> CommitCon
     for name, content in files.items():
         (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / name).write_text(content)
-    return CommitContext(repo, "0" * 40, tmp_path, len(files), REPOS[repo].areas)
+    return CommitContext(repo, "0" * 40, tmp_path, len(files), MEASURED[repo].areas)
 
 
 def test_bored_operations_skip_test_copies_and_comments(tmp_path: Path) -> None:

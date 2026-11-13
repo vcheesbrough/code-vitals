@@ -1,8 +1,9 @@
 """Catch a repo up: record every trunk commit not yet measured, for every
 registered measure version.
 
-The one entrypoint behind both the deploy-time backfill and the measured
-repos' push workflows. Safe to run concurrently and to interrupt:
+The one entrypoint behind both the deploy-time backfill (backfill.py) and the
+measured repos' plugin steps (plugin.py), which also registers the repo and
+its URL. Safe to run concurrently and to interrupt:
 
 - one advisory lock per repo for the whole run, so an overlapping run waits
   and then finds nothing left to do;
@@ -164,9 +165,10 @@ def _collect_from(
 def _ensure_repo(conn: Conn, repo: RepoConfig) -> int:
     with obs.db_span("INSERT", "upsert repo"):
         row = conn.execute(
-            "INSERT INTO repo (name, trunk) VALUES (%s, %s)"
-            " ON CONFLICT (name) DO UPDATE SET trunk = EXCLUDED.trunk RETURNING id",
-            (repo.name, repo.trunk),
+            "INSERT INTO repo (name, trunk, url) VALUES (%s, %s, %s)"
+            " ON CONFLICT (name) DO UPDATE SET trunk = EXCLUDED.trunk,"
+            " url = COALESCE(EXCLUDED.url, repo.url) RETURNING id",
+            (repo.name, repo.trunk, repo.url),
         ).fetchone()
     assert row is not None
     return int(str(row[0]))

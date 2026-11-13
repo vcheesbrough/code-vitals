@@ -1,6 +1,8 @@
 import pytest
 
-from code_vitals.repos import REPOS, VersionFile, iteration_of, pr_number_of, version_from
+from code_vitals.repos import VersionFile, iteration_of, pr_number_of, version_from
+
+from .measured_repos import MEASURED
 
 CARGO = """
 [workspace]
@@ -57,10 +59,10 @@ def test_pr_number_comes_from_the_squash_merge_suffix(subject: str, number: int 
 
 
 def test_the_measured_repos_and_their_trunks() -> None:
-    assert {name: repo.trunk for name, repo in REPOS.items()} == {
+    assert {name: repo.trunk for name, repo in MEASURED.items()} == {
         "v-note": "master",
         "bored": "main",
         "sovereign-config": "main",
     }
     # v-note's version.txt went stale; Cargo must be tried first.
-    assert REPOS["v-note"].version_sources[0].path == "Cargo.toml"
+    assert MEASURED["v-note"].version_sources[0].path == "Cargo.toml"

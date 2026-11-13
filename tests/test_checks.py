@@ -22,10 +22,11 @@ from code_vitals.db.migrate import migrate
 from code_vitals.measures import Measure, registered
 from code_vitals.measures.files import Files
 from code_vitals.obs import Trigger
-from code_vitals.repos import REPOS, RepoConfig, VersionFile, VersionSource
+from code_vitals.repos import RepoConfig, VersionFile, VersionSource
 
 from .conftest import TEST_PASSWORDS, role_url
 from .gitfixture import FixtureRepo, three_commit_history
+from .measured_repos import MEASURED
 from .test_collect import Empty, Snapshot
 
 BUILD = BuildInfo(version="0.7.99", revision="abc123")
@@ -156,11 +157,37 @@ def test_a_fixed_commit_that_was_never_measured_fails(
     assert problems == [f"fixture {'f' * 40}: files v1 is not recorded"]
 
 
-def test_a_repo_without_fixed_commits_fails(db: tuple[str, str], repo: FixtureRepo) -> None:
+def test_a_repo_without_an_entry_has_no_fixed_values_to_check(
+    db: tuple[str, str], repo: FixtureRepo
+) -> None:
+    # A self-registered repo has no fixed commits until someone pins some.
     _, writer = db
     _collected(writer, repo)
     problems = check_repo(writer, FIXTURE, repo.path, BUILD, measures=ONLY_FILES, expected={})
-    assert problems == ["expected_values.toml has no fixed commits for fixture"]
+    assert problems == []
+
+
+def test_an_entry_without_fixed_commits_fails(db: tuple[str, str], repo: FixtureRepo) -> None:
+    _, writer = db
+    _collected(writer, repo)
+    expected = load_expected("[fixture]\nruleset = 1\n")
+    problems = check_repo(writer, FIXTURE, repo.path, BUILD, measures=ONLY_FILES, expected=expected)
+    assert problems == ["expected_values.toml has an entry for fixture but no fixed commits"]
+
+
+def test_an_incomplete_ruleset_is_a_problem(db: tuple[str, str], repo: FixtureRepo) -> None:
+    owner, writer = db
+    _collected(writer, repo)
+    assert checks._check_ruleset(writer, FIXTURE) == []
+    with psycopg.connect(owner) as conn:
+        conn.execute("UPDATE area_ruleset SET status = 'backfilling'")
+    assert checks._check_ruleset(writer, FIXTURE) == [
+        "fixture's area ruleset v1 is backfilling, not complete"
+    ]
+    absent = RepoConfig("absent", "main", ())
+    assert checks._check_ruleset(writer, absent) == [
+        "absent's area ruleset v1 is not registered, not complete"
+    ]
 
 
 def test_a_non_recomputable_measure_is_not_pinned_at_the_fixed_commits(
@@ -175,7 +202,7 @@ def test_a_non_recomputable_measure_is_not_pinned_at_the_fixed_commits(
         writer, FIXTURE, repo.path, BUILD, measures=measures, expected=load_expected(_table(repo))
     )
     assert problems == []
-    assert check_status(writer, [FIXTURE], measures=measures) == []
+    assert check_status(writer, ["fixture"], measures=measures) == []
 
 
 def test_a_recorded_non_recomputable_measure_is_not_pinned_either(
@@ -228,7 +255,7 @@ def _rows(url: str, sql: str) -> list[tuple[object, ...]]:
 def test_status_passes_once_every_repo_is_collected(db: tuple[str, str], repo: FixtureRepo) -> None:
     _, writer = db
     _collected(writer, repo)
-    assert check_status(writer, [FIXTURE], measures=ONLY_FILES) == []
+    assert check_status(writer, ["fixture"], measures=ONLY_FILES) == []
 
 
 def test_status_fails_on_incomplete_versions_and_failed_or_missing_runs(
@@ -243,27 +270,23 @@ def test_status_fails_on_incomplete_versions_and_failed_or_missing_runs(
             "INSERT INTO run (repo_id, trigger, collector_version, collector_revision, outcome)"
             " SELECT id, 'push', '0.7.1', 'def', 'failure' FROM repo"
         )
-    absent = RepoConfig("absent", "main", FIXTURE.version_sources)
+    problems = check_status(writer, ["fixture", "absent"], measures=[Files(), Empty()])
 
-    problems = check_status(writer, [FIXTURE, absent], measures=[Files(), Empty()])
-
-    assert problems[:3] == [
+    assert problems[:2] == [
         "measure files v1 is backfilling, not complete",
         "measure empty v1 is not registered, not complete",
-        "fixture's area ruleset v1 is backfilling, not complete",
     ]
-    assert problems[3].startswith("fixture's last run (") and problems[3].endswith(") is failure")
-    assert problems[4:] == [
-        "absent's area ruleset v1 is not registered, not complete",
-        "absent has no collector run",
-    ]
+    assert problems[2].startswith("fixture's last run (") and problems[2].endswith(") is failure")
+    assert problems[3:] == ["absent has no collector run"]
+    # A repo the deployment skipped is not named, so its failed run is not checked.
+    assert check_status(writer, [], measures=[]) == []
 
 
 def test_the_bundled_table_covers_every_repo_and_measure_this_build_has() -> None:
     table = load_expected()
     measures = fixed_value_measures(registered())
-    assert set(table) == set(REPOS)
-    for name, repo in REPOS.items():
+    assert set(table) == set(MEASURED)
+    for name, repo in MEASURED.items():
         assert table[name].ruleset == repo.areas.version
         assert len(table[name].commits) >= 2
         for by_name in table[name].commits.values():
@@ -278,30 +301,6 @@ def test_render_round_trips_areas_facets_and_fractions() -> None:
     assert load_expected(text)["r"].commits["a" * 40]["files"].values == values["files"]
 
 
-def test_cli_check_repo_fails_the_step_on_a_problem(
-    db: tuple[str, str],
-    repo: FixtureRepo,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    _, writer = db
-    _collected(writer, repo)
-    wrong = load_expected(_table(repo, files_at_second="4"))
-    monkeypatch.setattr(checks, "load_expected", lambda: wrong)
-    monkeypatch.setattr(checks, "registered", lambda: ONLY_FILES)
-
-    status = cli.main(
-        ["check-repo", "--repo", "fixture", "--clone", str(repo.path)],
-        {cli.DATABASE_URL_ENV: writer},
-        repos={"fixture": FIXTURE},
-    )
-
-    assert status == 1
-    err = capsys.readouterr().err
-    assert "files v1: - expected 4 got 3" in err
-    assert "code-vitals check-repo: 1 problem(s)" in err
-
-
 def test_cli_check_status_passes(
     db: tuple[str, str],
     repo: FixtureRepo,
@@ -311,5 +310,5 @@ def test_cli_check_status_passes(
     _, writer = db
     _collected(writer, repo)
     monkeypatch.setattr(checks, "registered", lambda: ONLY_FILES)
-    status = cli.main(["check-status"], {cli.DATABASE_URL_ENV: writer}, repos={"fixture": FIXTURE})
+    status = cli.main(["check-status", "--repo", "fixture"], {cli.DATABASE_URL_ENV: writer})
     assert (status, capsys.readouterr().out.splitlines()[-1]) == (0, "code-vitals check-status: ok")

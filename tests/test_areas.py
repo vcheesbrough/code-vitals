@@ -1,7 +1,8 @@
 import pytest
 
 from code_vitals.areas import GENERIC, TESTS, TOOLING, AreaRuleset, ruleset
-from code_vitals.repos import REPOS
+
+from .measured_repos import MEASURED
 
 
 def test_a_ruleset_must_end_with_the_catch_all() -> None:
@@ -35,8 +36,8 @@ def test_generated_and_vendored_files_are_never_measured(path: str) -> None:
      "test-consumers/c/src/lib.rs", "frontend/src/a.test.ts"],
 )  # fmt: skip
 def test_test_code_is_tests_in_every_repo(path: str) -> None:
-    for repo in REPOS.values():
-        assert repo.areas.area_of(path) == TESTS, (repo.name, path)
+    for name, repo in MEASURED.items():
+        assert repo.areas.area_of(path) == TESTS, (name, path)
 
 
 @pytest.mark.parametrize(
@@ -61,16 +62,16 @@ def test_test_code_is_tests_in_every_repo(path: str) -> None:
     ],
 )
 def test_each_repos_areas(repo: str, path: str, area: str) -> None:
-    assert REPOS[repo].areas.area_of(path) == area
+    assert MEASURED[repo].areas.area_of(path) == area
 
 
 def test_rules_round_trip_as_json() -> None:
-    rules = REPOS["bored"].areas.as_json()
+    rules = MEASURED["bored"].areas.as_json()
     assert rules["rules"][-1] == ["**", "tooling"]
     assert "**/*.lock" in rules["exclude"]
 
 
 def test_only_gradle_build_output_is_excluded_as_build() -> None:
-    sovereign = REPOS["sovereign-config"].areas
+    sovereign = MEASURED["sovereign-config"].areas
     assert sovereign.area_of("crates/sovereign-config-server/build/web_bundle.rs") == "server"
-    assert REPOS["v-note"].areas.area_of("android/app/build/outputs/x.apk") is None
+    assert MEASURED["v-note"].areas.area_of("android/app/build/outputs/x.apk") is None

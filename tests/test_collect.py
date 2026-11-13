@@ -22,12 +22,16 @@ from code_vitals.measures.complexity import FunctionHotspots, Functions
 from code_vitals.measures.files import Files
 from code_vitals.obs import Outcome, Trigger
 from code_vitals.repos import RepoConfig, VersionFile, VersionSource
+from code_vitals.settings import SETTINGS_ENV
 
 from .conftest import TEST_PASSWORDS, role_url
 from .gitfixture import FixtureRepo, make_repo, pyproject, three_commit_history
 
 BUILD = BuildInfo(version="0.4.99", revision="abc123")
 FIXTURE = RepoConfig("fixture", "main", (VersionSource("pyproject.toml", VersionFile.PYPROJECT),))
+FIXTURE_SETTINGS = (
+    '{"trunk": "main", "version_sources": [{"path": "pyproject.toml", "kind": "pyproject"}]}'
+)
 # These tests are about the collector, not the measures: one simple measure.
 ONLY_FILES = [Files()]
 
@@ -638,12 +642,9 @@ def test_cli_collect_fetch_clones_the_configured_url(
 ) -> None:
     owner, writer = db
     monkeypatch.setattr(collect_module, "registered", lambda: ONLY_FILES)
-    fetched = RepoConfig(FIXTURE.name, FIXTURE.trunk, FIXTURE.version_sources, url=str(repo.path))
-
     status = cli.main(
-        ["collect", "--repo", "fixture", "--fetch", "--trigger", "push"],
-        {cli.DATABASE_URL_ENV: writer},
-        repos={"fixture": fetched},
+        ["collect", "--repo", "fixture", "--url", str(repo.path), "--fetch", "--trigger", "push"],
+        {cli.DATABASE_URL_ENV: writer, SETTINGS_ENV: FIXTURE_SETTINGS},
     )
 
     assert status == 0
@@ -651,3 +652,53 @@ def test_cli_collect_fetch_clones_the_configured_url(
     assert f"code-vitals collect: fixture from {repo.path} (push)" in out
     assert "fixture: 3 commit(s) measured of 3 to do" in out
     assert _rows(owner, "SELECT trigger::text, outcome::text FROM run") == [("push", "success")]
+    # The repo registers itself, with where it was cloned from.
+    assert _rows(owner, "SELECT name, trunk, url FROM repo") == [
+        ("fixture", "main", str(repo.path))
+    ]
+
+
+def test_a_run_from_a_clone_keeps_the_recorded_url(
+    db: tuple[str, str], repo: FixtureRepo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner, writer = db
+    with_url = RepoConfig(FIXTURE.name, FIXTURE.trunk, FIXTURE.version_sources, url=str(repo.path))
+    collect(writer, with_url, repo.path, Trigger.PUSH, BUILD, measures=ONLY_FILES)
+    collect(writer, FIXTURE, repo.path, Trigger.MANUAL, BUILD, measures=ONLY_FILES)
+    assert _rows(owner, "SELECT url FROM repo") == [(str(repo.path),)]
+
+
+@pytest.mark.parametrize(
+    ("settings_json", "message"),
+    [
+        (None, "CODE_VITALS_SETTINGS is not JSON"),
+        ('{"trunk": "main", "colour": "red"}', "unknown setting(s) colour"),
+    ],
+)
+def test_cli_collect_refuses_missing_or_invalid_settings(
+    db: tuple[str, str],
+    repo: FixtureRepo,
+    capsys: pytest.CaptureFixture[str],
+    settings_json: str | None,
+    message: str,
+) -> None:
+    owner, writer = db
+    env = {cli.DATABASE_URL_ENV: writer}
+    if settings_json is not None:
+        env[SETTINGS_ENV] = settings_json
+    status = cli.main(["collect", "--repo", "fixture", "--clone", str(repo.path)], env)
+    assert status == 2
+    assert message in capsys.readouterr().err
+    assert _rows(owner, "SELECT count(*) FROM run") == [(0,)]
+
+
+def test_cli_collect_fetch_needs_a_url(
+    db: tuple[str, str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    _, writer = db
+    status = cli.main(
+        ["collect", "--repo", "fixture", "--fetch"],
+        {cli.DATABASE_URL_ENV: writer, SETTINGS_ENV: FIXTURE_SETTINGS},
+    )
+    assert status == 2
+    assert "--fetch needs --url" in capsys.readouterr().err

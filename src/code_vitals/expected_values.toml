@@ -1,10 +1,10 @@
 # Expected measure values at fixed trunk commits of each measured repo.
 #
-# Checked after every deployment's collect (`code-vitals check-repo`,
+# Checked after every deployment's collect (`code-vitals backfill-repo`,
 # src/code_vitals/checks.py). A commit never changes, so neither may its
 # values: a change that alters them bumps the measure's version (or the repo's
 # area ruleset), and updates this table in the same PR, so every change in
-# numbers is reviewed. On a mismatch, check-repo prints the recorded entries in
+# numbers is reviewed. On a mismatch, backfill-repo prints the recorded entries in
 # this format, ready to review and paste.
 #
 # [<repo>]                         ruleset = the area ruleset version written for
@@ -13,6 +13,8 @@
 #                                  "-" for no area, no "/<facet>" when unsplit.
 # Every recomputable registered measure is listed at every commit, even with
 # no values; a non-recomputable one cannot be pinned (checks.fixed_value_measures).
+# A repo with no entry (one that registered itself, card #564) has no fixed
+# values to check until someone pins some here.
 
 [v-note]
 ruleset = 1

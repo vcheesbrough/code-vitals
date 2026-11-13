@@ -28,6 +28,9 @@ from code_vitals.areas import GENERIC, AreaRuleset, ruleset
 from code_vitals.repos import RepoConfig, VersionFile, VersionSource
 
 WORKFLOW_PATH = ".woodpecker/code-vitals.yml"
+# Woodpecker names a workflow after its file, and reads either extension.
+WORKFLOW_NAME = "code-vitals"
+WORKFLOW_PATHS = (WORKFLOW_PATH, ".woodpecker/code-vitals.yaml")
 PLUGIN_IMAGE = "registry.desync.link/code-vitals-plugin"
 SETTINGS_ENV = "CODE_VITALS_SETTINGS"
 PLUGIN_ENV_PREFIX = "PLUGIN_"

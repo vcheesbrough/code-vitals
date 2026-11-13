@@ -37,6 +37,7 @@ TELEMETRY = {
 # Set by Woodpecker in every step.
 REPO_NAME_ENV = "CI_REPO_NAME"
 REPO_URL_ENV = "CI_REPO_CLONE_URL"
+WORKFLOW_NAME_ENV = "CI_WORKFLOW_NAME"
 PIPELINE_NUMBER_ENV = "CI_PIPELINE_NUMBER"
 PASSWORD_ENV = settings.PLUGIN_ENV_PREFIX + settings.WRITER_PASSWORD.upper()
 
@@ -59,6 +60,14 @@ def collector_env(environ: Mapping[str, str]) -> tuple[str, str, dict[str, str]]
     """The repo's name and URL, and the variables the collector container gets
     by name. Raises PluginError or SettingsError on a misconfigured step."""
     found = settings.from_plugin_env(environ)
+    # Deployments read the settings from that one file; a step elsewhere would
+    # register the repo and then be skipped by every deployment unnoticed.
+    workflow = environ.get(WORKFLOW_NAME_ENV, "")
+    if workflow != settings.WORKFLOW_NAME:
+        raise PluginError(
+            f"the code-vitals step must be in {settings.WORKFLOW_PATH}, where deployments read"
+            f" its settings, not in workflow {workflow!r}"
+        )
     name = environ.get(REPO_NAME_ENV, "")
     if not _NAME.match(name):
         raise PluginError(f"{REPO_NAME_ENV} must be the repo's name, not {name!r}")
@@ -104,8 +113,10 @@ def run(
         f" area ruleset v{found['areas']['version']}; starting {image}",
         flush=True,
     )
-    # Only what the collector needs, plus what docker itself reads; the plugin
-    # settings (the password among them) stay out of the docker CLI's env.
+    # The docker CLI needs this process's environment (PATH, DOCKER_HOST, …),
+    # not just `environ` (the settings, which main() passes and tests replace).
+    # The plugin settings in it — the password among them — are left out: the
+    # collector gets only what it needs, by name.
     docker_env = {k: v for k, v in os.environ.items() if not k.startswith("PLUGIN_")}
     docker_env.update(env)
     names = [flag for var in env for flag in ("-e", var)]

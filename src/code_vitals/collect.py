@@ -54,6 +54,10 @@ class MeasureDefinitionConflict(RuntimeError):
     or definition: it changed without a version bump."""
 
 
+class RepoNameConflict(RuntimeError):
+    """Another repo is already registered under this name, from another URL."""
+
+
 class AreaRulesetConflict(RuntimeError):
     """A known ruleset version now has different rules: they changed without a
     version bump."""
@@ -162,15 +166,32 @@ def _collect_from(
         )
 
 
+# A URL compared without a trailing `.git` or `/`, which name the same repo.
+_SAME_URL = r"(\.git)?/*$"
+
+
 def _ensure_repo(conn: Conn, repo: RepoConfig) -> int:
+    """Register the repo, or update its trunk. A repo is registered under its
+    name, which the plugin takes from Woodpecker's CI_REPO_NAME (no owner); a
+    second repo of the same name — a fork, another org — is refused rather
+    than taking over the row, its URL and its history."""
     with obs.db_span("INSERT", "upsert repo"):
         row = conn.execute(
             "INSERT INTO repo (name, trunk, url) VALUES (%s, %s, %s)"
             " ON CONFLICT (name) DO UPDATE SET trunk = EXCLUDED.trunk,"
-            " url = COALESCE(EXCLUDED.url, repo.url) RETURNING id",
-            (repo.name, repo.trunk, repo.url),
+            " url = COALESCE(repo.url, EXCLUDED.url)"
+            " WHERE repo.url IS NULL OR EXCLUDED.url IS NULL"
+            " OR regexp_replace(repo.url, %s, '') = regexp_replace(EXCLUDED.url, %s, '')"
+            " RETURNING id",
+            (repo.name, repo.trunk, repo.url, _SAME_URL, _SAME_URL),
         ).fetchone()
-    assert row is not None
+        if row is None:
+            recorded = conn.execute("SELECT url FROM repo WHERE name = %s", (repo.name,)).fetchone()
+            raise RepoNameConflict(
+                f"a repo named {repo.name} is already registered from"
+                f" {recorded[0] if recorded else '?'}; refusing to record {repo.url} under that"
+                " name"
+            )
     return int(str(row[0]))
 
 

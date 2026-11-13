@@ -13,7 +13,13 @@ from code_vitals import cli
 from code_vitals import collect as collect_module
 from code_vitals.areas import AreaRuleset, ruleset
 from code_vitals.build_info import BuildInfo
-from code_vitals.collect import AreaRulesetConflict, MeasureDefinitionConflict, collect, lock_key
+from code_vitals.collect import (
+    AreaRulesetConflict,
+    MeasureDefinitionConflict,
+    RepoNameConflict,
+    collect,
+    lock_key,
+)
 from code_vitals.db.migrate import migrate
 from code_vitals.gitrepo import GitError
 from code_vitals.measures import CommitContext, Kind, Measure, Value, registered
@@ -666,6 +672,36 @@ def test_a_run_from_a_clone_keeps_the_recorded_url(
     collect(writer, with_url, repo.path, Trigger.PUSH, BUILD, measures=ONLY_FILES)
     collect(writer, FIXTURE, repo.path, Trigger.MANUAL, BUILD, measures=ONLY_FILES)
     assert _rows(owner, "SELECT url FROM repo") == [(str(repo.path),)]
+
+
+def test_a_second_repo_of_the_same_name_is_refused(db: tuple[str, str], repo: FixtureRepo) -> None:
+    owner, writer = db
+    first = RepoConfig(FIXTURE.name, FIXTURE.trunk, FIXTURE.version_sources, url=str(repo.path))
+    collect(writer, first, repo.path, Trigger.PUSH, BUILD, measures=ONLY_FILES)
+    before = _rows(owner, "SELECT name, trunk, url FROM repo")
+    fork = RepoConfig(
+        FIXTURE.name, "dev", FIXTURE.version_sources, url="https://x.example/fork.git"
+    )
+
+    with pytest.raises(RepoNameConflict, match=f"already registered from {repo.path}"):
+        collect(writer, fork, repo.path, Trigger.PUSH, BUILD, measures=ONLY_FILES)
+
+    assert _rows(owner, "SELECT name, trunk, url FROM repo") == before
+    # Nothing recorded for the newcomer: no run on the existing repo's row.
+    assert _rows(owner, "SELECT count(*) FROM run") == [(1,)]
+
+
+@pytest.mark.parametrize("suffix", ["", ".git", "/", ".git/"])
+def test_the_same_repo_with_or_without_dot_git_is_not_a_conflict(
+    db: tuple[str, str], repo: FixtureRepo, suffix: str
+) -> None:
+    owner, writer = db
+    url = "https://github.com/vcheesbrough/fixture"
+    with psycopg.connect(owner) as conn:
+        conn.execute("INSERT INTO repo (name, trunk, url) VALUES ('fixture', 'main', %s)", (url,))
+    same = RepoConfig(FIXTURE.name, FIXTURE.trunk, FIXTURE.version_sources, url=url + suffix)
+    collect(writer, same, repo.path, Trigger.PUSH, BUILD, measures=ONLY_FILES)
+    assert _rows(owner, "SELECT url FROM repo") == [(url,)]
 
 
 @pytest.mark.parametrize(

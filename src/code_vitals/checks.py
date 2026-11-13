@@ -3,7 +3,8 @@
 - check_repo, per repo with the clone just collected: a second catch-up finds
   nothing to do, the repo's area ruleset is complete, and the values recorded
   at a few fixed commits are exactly those in expected_values.toml (a repo
-  with no entry there has no fixed values to check). Commits never change, so neither may their
+  with no entry there, or pinned under another area ruleset than its settings
+  now have, has no fixed values to check). Commits never change, so neither may their
   values: a change that alters them bumps the measure's version, and the same
   PR updates the table, so every change in numbers is reviewed.
   Non-recomputable measures are not in the table (fixed_value_measures).
@@ -111,6 +112,18 @@ def check_repo(
     entry = expected.get(repo.name)
     if entry is None:
         log.info("expected_values.toml has no fixed commits for %s; values not checked", repo.name)
+    elif entry.ruleset != repo.areas.version:
+        # The ruleset is the measured repo's own setting, so bumping it is that
+        # repo's change: it must not block code-vitals' deploys. Its fixed
+        # values are not checked until the table is repinned under the new
+        # ruleset (the warning reaches the step log).
+        log.warning(
+            "expected_values.toml pins %s under area ruleset v%d, but its plugin settings"
+            " now have v%d: fixed values not checked until the table is updated",
+            repo.name,
+            entry.ruleset,
+            repo.areas.version,
+        )
     else:
         problems += _check_values(conninfo, repo, measures, entry)
     return problems
@@ -146,11 +159,6 @@ def _check_values(
     if not expected.commits:
         return [f"expected_values.toml has an entry for {repo.name} but no fixed commits"]
     problems = []
-    if expected.ruleset != repo.areas.version:
-        problems.append(
-            f"expected_values.toml was written for {repo.name}'s area ruleset"
-            f" v{expected.ruleset}; this build has v{repo.areas.version}: update the table"
-        )
     fixed = fixed_value_measures(measures)
     with psycopg.connect(conninfo) as conn:
         for sha, by_name in expected.commits.items():

@@ -84,12 +84,17 @@ steps:
 - `areas`: `version` and `rules` (`{glob, area}`, first match wins, area names
   lower-case words). Shared excludes, the test rules and the `tooling`
   catch-all are added around them (`src/code_vitals/areas.py`). Changing the
-  rules without a new `version` is refused.
+  rules without a new `version` is refused; a new `version` re-measures the
+  repo's history at the next deploy, and its fixed values in
+  `expected_values.toml`, if any, are skipped until repinned.
 
-The plugin validates the settings (`src/code_vitals/settings.py`; an unknown or
-invalid setting fails the step with a message naming it), then starts the
+The step must be in `.woodpecker/code-vitals.yml` (deployments read its
+settings there; the plugin refuses to run from any other workflow). The plugin
+validates the settings (`src/code_vitals/settings.py`; an unknown or invalid
+setting fails the step with a message naming it), then starts the
 collector on code-vitals' prod network through the socket. The first run
-registers the repo and its URL and measures its whole history. Every
+registers the repo under its name and URL (a second repo of the same name
+from another URL is refused) and measures its whole history. Every
 deployment then re-measures it from the same settings, read from that file at
 its trunk head; a repo whose file has no plugin step is skipped. The
 operations and e2e-suite rules of the `functionality` measures are still per

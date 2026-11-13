@@ -2,6 +2,7 @@
 environment each one saw."""
 
 import json
+import os
 import re
 import stat
 import sys
@@ -40,6 +41,7 @@ STEP_ENV = {
     "CI_REPO_NAME": "v-note",
     "CI_REPO_CLONE_URL": "https://github.com/vcheesbrough/v-note.git",
     "CI_PIPELINE_NUMBER": "77",
+    "CI_WORKFLOW_NAME": "code-vitals",
 }
 
 FAKE_DOCKER = """#!{python}
@@ -78,9 +80,14 @@ def _calls(log: Path) -> list[dict[str, Any]]:
 
 
 def test_starts_this_builds_collector_on_both_networks(
-    docker: tuple[str, Path], capfd: pytest.CaptureFixture[str]
+    docker: tuple[str, Path], capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path, log = docker
+    # In a real step the settings are in the process environment too, which
+    # the docker CLI's environment is built from: they must be filtered out.
+    for name, value in STEP_ENV.items():
+        monkeypatch.setenv(name, value)
+    assert os.environ["PLUGIN_WRITER_PASSWORD"] == PASSWORD
     assert plugin.run(STEP_ENV, BUILD, docker=path) == 0
 
     calls = _calls(log)
@@ -168,6 +175,8 @@ def test_a_docker_failure_fails_the_step_and_leaves_nothing_behind(
         ({"PLUGIN_COLOUR": "red"}, r"unknown setting\(s\) colour"),
         ({"PLUGIN_WRITER_PASSWORD": None}, "the writer_password setting is required"),
         ({"PLUGIN_WRITER_PASSWORD": ""}, "the writer_password setting is required"),
+        ({"CI_WORKFLOW_NAME": "build"}, r"must be in \.woodpecker/code-vitals\.yml.*'build'"),
+        ({"CI_WORKFLOW_NAME": None}, r"must be in \.woodpecker/code-vitals\.yml.*''"),
         ({"CI_REPO_NAME": None}, "CI_REPO_NAME must be the repo's name"),
         ({"CI_REPO_NAME": "a b"}, "CI_REPO_NAME must be the repo's name"),
         ({"CI_REPO_CLONE_URL": "git@github.com:x/y.git"}, "public http"),

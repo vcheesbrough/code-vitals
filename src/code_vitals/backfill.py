@@ -48,11 +48,15 @@ def registered_repos(conninfo: str) -> list[RegisteredRepo]:
 
 
 def settings_at_trunk(clone: Clone, trunk: str) -> Settings | None:
-    """The plugin settings in the clone's workflow file at the trunk head, or
-    None when the file or its plugin step is absent. Raises SettingsError for
-    a step whose settings are invalid."""
-    text = clone.read_file(clone.resolve_trunk(trunk), settings.WORKFLOW_PATH)
-    return None if text is None else settings.from_workflow(text)
+    """The plugin settings in the clone's code-vitals workflow file (`.yml`,
+    else `.yaml`) at the trunk head, or None when the file or its plugin step
+    is absent. Raises SettingsError for a step whose settings are invalid."""
+    head = clone.resolve_trunk(trunk)
+    for path in settings.WORKFLOW_PATHS:
+        text = clone.read_file(head, path)
+        if text is not None:
+            return settings.from_workflow(text)
+    return None
 
 
 class Outcome(StrEnum):

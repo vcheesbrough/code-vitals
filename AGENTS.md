@@ -106,13 +106,18 @@ Two environments on mini, each its own compose project of `deploy/compose.yaml`:
   plugin step is skipped with a log line, not failed. Then `check` runs
   `check-status` over the repos collected; `tag-release` waits on it. A
   measure or ruleset bump therefore backfills in dev from the branch and in
-  prod on release, and must update `src/code_vitals/expected_values.toml` in
-  the same PR (for the repos pinned there). Only prod moves `:stable` (the
+  prod on release, and a measure bump must update
+  `src/code_vitals/expected_values.toml` in the same PR (for the repos pinned
+  there). A measured repo bumping its own area ruleset does not fail
+  code-vitals' deploys: that repo's fixed values are skipped with a warning
+  until a code-vitals PR repins them under the new ruleset. Only prod moves `:stable` (the
   plugin's and the collector's), in `promote-stable`, after `tag-release`.
 - **No central repo list.** A repo onboards itself with one plugin step (README
   § Measuring a repo) and registers on its first run; its trunk, version
   sources and area rules live in that step's `settings:`, validated by
-  `src/code_vitals/settings.py` (shared by the plugin and the collector).
+  `src/code_vitals/settings.py` (shared by the plugin and the collector). A
+  repo registers under its short name (`CI_REPO_NAME`); a second repo of the
+  same name from another URL is refused, never merged into the first.
   Only the `functionality` measures' operations/e2e-suite rules stay keyed by
   repo name in `src/code_vitals/measures/functionality.py` (moving them would
   change those measures' definitions).

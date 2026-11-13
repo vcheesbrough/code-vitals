@@ -101,21 +101,32 @@ def test_a_version_bump_without_a_table_update_fails(
     assert "files: the table has v2, this build v1" in problems[0]
 
 
-def test_a_ruleset_bump_without_a_table_update_fails(
-    db: tuple[str, str], repo: FixtureRepo
+def test_a_ruleset_bump_in_the_repos_settings_skips_its_fixed_values_with_a_warning(
+    db: tuple[str, str], repo: FixtureRepo, caplog: pytest.LogCaptureFixture
 ) -> None:
+    # The ruleset is the measured repo's own setting: its bump must not fail
+    # code-vitals' deploys until someone repins the table.
     _, writer = db
     bumped = RepoConfig(
         FIXTURE.name, FIXTURE.trunk, FIXTURE.version_sources, ruleset(2, ("b/**", "b"))
     )
     collect(writer, bumped, repo.path, Trigger.BACKFILL, BUILD, measures=ONLY_FILES)
-    problems = check_repo(
-        writer, bumped, repo.path, BUILD, measures=ONLY_FILES, expected=load_expected(_table(repo))
+    # Values that would not match, to show they are not compared.
+    table = load_expected(_table(repo, files_at_second="99"))
+    with caplog.at_level("WARNING", logger="code_vitals.checks"):
+        problems = check_repo(writer, bumped, repo.path, BUILD, measures=ONLY_FILES, expected=table)
+    assert problems == []
+    assert (
+        "expected_values.toml pins fixture under area ruleset v1, but its plugin settings now"
+        " have v2: fixed values not checked until the table is updated"
+    ) in caplog.messages
+
+    # Repinned under the new ruleset, the values are checked again.
+    repinned = load_expected(
+        _table(repo, files_at_second="99").replace("ruleset = 1", "ruleset = 2")
     )
-    assert problems == [
-        "expected_values.toml was written for fixture's area ruleset v1; this build has v2:"
-        " update the table"
-    ]
+    problems = check_repo(writer, bumped, repo.path, BUILD, measures=ONLY_FILES, expected=repinned)
+    assert len(problems) == 1 and "files v1: - expected 99 got 3" in problems[0]
 
 
 def test_a_registered_measure_missing_from_the_table_fails(

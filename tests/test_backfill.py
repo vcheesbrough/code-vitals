@@ -93,6 +93,21 @@ def test_settings_are_read_from_the_workflow_at_the_trunk_head(repo: FixtureRepo
     assert backfill_module.settings_at_trunk(Clone(repo.path), "old") is None
 
 
+def test_the_yaml_extension_is_read_too(repo: FixtureRepo) -> None:
+    repo.git("mv", WORKFLOW_PATH, ".woodpecker/code-vitals.yaml")
+    repo.git("commit", "-q", "-m", "Rename")
+    found = backfill_module.settings_at_trunk(Clone(repo.path), "main")
+    assert found is not None and found.areas.version == 2
+
+
+def test_a_plugin_step_in_another_workflow_file_is_not_read(repo: FixtureRepo) -> None:
+    # The plugin refuses to run there (test_plugin), so this is never a repo
+    # that registered and is then skipped unnoticed.
+    repo.git("mv", WORKFLOW_PATH, ".woodpecker/build.yml")
+    repo.git("commit", "-q", "-m", "Move")
+    assert backfill_module.settings_at_trunk(Clone(repo.path), "main") is None
+
+
 def test_a_repo_with_the_plugin_step_is_collected_and_checked(
     db: tuple[str, str], repo: FixtureRepo
 ) -> None:

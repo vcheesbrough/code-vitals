@@ -24,12 +24,8 @@ from .conftest import TEST_PASSWORDS, role_url
 from .gitfixture import FixtureRepo, three_commit_history
 from .otlp_receiver import OtlpReceiver, attrs
 
-RUN = (
-    "import sys; from code_vitals import cli;"
-    " from code_vitals.repos import RepoConfig, VersionSource, VersionFile;"
-    " sys.exit(cli.main(sys.argv[1:], repos={'fixture': RepoConfig('fixture', 'main',"
-    " (VersionSource('pyproject.toml', VersionFile.PYPROJECT),))}))"
-)
+RUN = "import sys; from code_vitals import cli; sys.exit(cli.main(sys.argv[1:]))"
+SETTINGS = '{"trunk": "main", "version_sources": [{"path": "pyproject.toml", "kind": "pyproject"}]}'
 
 
 @pytest.fixture
@@ -47,7 +43,14 @@ def run_collect(
     writer: str, repo: FixtureRepo, otel: Mapping[str, str], timeout: float = 60
 ) -> tuple[subprocess.CompletedProcess[str], float]:
     env = {k: v for k, v in os.environ.items() if not k.startswith("OTEL_")}
-    env.update({"CODE_VITALS_DATABASE_URL": writer, "CI_PIPELINE_NUMBER": "42", **otel})
+    env.update(
+        {
+            "CODE_VITALS_DATABASE_URL": writer,
+            "CODE_VITALS_SETTINGS": SETTINGS,
+            "CI_PIPELINE_NUMBER": "42",
+            **otel,
+        }
+    )
     started = time.monotonic()
     result = subprocess.run(
         [sys.executable, "-c", RUN, "collect", "--repo", "fixture", "--clone", str(repo.path)],

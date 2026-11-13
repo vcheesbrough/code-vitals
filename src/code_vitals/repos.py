@@ -1,8 +1,9 @@
-"""The repositories code-vitals measures, and how to read each one.
+"""How code-vitals reads a measured repo.
 
-Changing a repo's entry changes recorded commit attributes (its iteration)
-for new commits only; area rules, which change measured values, arrive with
-their own versioning (card #495).
+Each repo's configuration comes from its own code-vitals plugin step
+(code_vitals.settings); there is no central list. Changing a repo's version
+sources changes recorded commit attributes (its iteration) for new commits
+only; area rules, which change measured values, are versioned (areas.py).
 """
 
 import re
@@ -10,7 +11,7 @@ import tomllib
 from dataclasses import dataclass
 from enum import StrEnum
 
-from code_vitals.areas import GENERIC, AreaRuleset, ruleset
+from code_vitals.areas import GENERIC, AreaRuleset
 
 
 class VersionFile(StrEnum):
@@ -36,58 +37,10 @@ class RepoConfig:
     # a repo that moved its version keeps an iteration across the move.
     version_sources: tuple[VersionSource, ...]
     areas: AreaRuleset = GENERIC
-    # Where `collect --fetch` clones it from: public, so no credentials.
+    # Where `collect --fetch` and a deployment's backfill clone it from:
+    # public, so no credentials.
     url: str | None = None
 
-
-CARGO_SOURCES = (
-    VersionSource("Cargo.toml", VersionFile.CARGO_WORKSPACE),
-    VersionSource("Cargo.toml", VersionFile.CARGO_PACKAGE),
-)
-
-REPOS: dict[str, RepoConfig] = {
-    # version.txt is older than [workspace.package] in v-note and has gone
-    # stale (0.54 against Cargo's 0.69 on 2026-10-21), so Cargo comes first.
-    "v-note": RepoConfig(
-        "v-note",
-        "master",
-        (*CARGO_SOURCES, VersionSource("version.txt", VersionFile.PLAIN)),
-        ruleset(
-            1,
-            ("crates/**", "server"),  # the axum server and its protocol crate
-            ("frontend/**", "web"),
-            ("android/**", "android"),
-        ),
-        "https://github.com/vcheesbrough/v-note.git",
-    ),
-    "bored": RepoConfig(
-        "bored",
-        "main",
-        CARGO_SOURCES,
-        ruleset(
-            1,
-            ("backend/**", "backend"),
-            ("frontend/**", "web"),
-            ("shared/**", "shared"),
-            ("mcp/**", "shared"),
-        ),
-        "https://github.com/vcheesbrough/bored.git",
-    ),
-    "sovereign-config": RepoConfig(
-        "sovereign-config",
-        "main",
-        CARGO_SOURCES,
-        ruleset(
-            1,
-            ("crates/sovereign-config-server/**", "server"),
-            ("crates/sovereign-config-woodpecker-broker/**", "server"),
-            ("crates/sovereign-config-web/**", "web"),
-            ("crates/**", "libraries"),
-            ("proto/**", "libraries"),
-        ),
-        "https://github.com/vcheesbrough/sovereign-config.git",
-    ),
-}
 
 _SEMVER = re.compile(r"^\s*v?(\d+)\.(\d+)\.(\d+)")
 

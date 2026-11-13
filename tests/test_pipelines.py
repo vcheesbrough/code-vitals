@@ -4,8 +4,9 @@ Ported in spirit from sovereign-config's tests/pipeline_prod_gating.rs: prod is
 deployable from `main` only, enforced in the workflow's own `when:` so a
 deployment from another branch never starts; dev from any branch; a push never
 deploys; and every image is pinned by digest. Also that every deployment
-collects and checks every repo with the deployed image before it is tagged,
-and that only prod moves :stable, last.
+collects and checks every registered repo with the deployed image before it is
+tagged, that the plugin image is built, checked and published with the
+collector, and that only prod moves :stable (both images'), last.
 """
 
 from pathlib import Path
@@ -13,8 +14,6 @@ from typing import Any
 
 import pytest
 import yaml
-
-from code_vitals.repos import REPOS
 
 WOODPECKER = Path(__file__).resolve().parent.parent / ".woodpecker"
 
@@ -98,28 +97,31 @@ def test_a_failed_smoke_check_leaves_the_commit_untagged(env: str) -> None:
 
 
 @pytest.mark.parametrize("env", ["dev", "prod"])
-def test_every_repo_is_collected_and_checked_with_the_deployed_image(env: str) -> None:
+def test_every_registered_repo_is_collected_and_checked_with_the_deployed_image(env: str) -> None:
+    # Card #564: one step over the repos the database lists, not one per repo
+    # from a list in this repo; check-status then covers the repos it collected.
     steps = _workflow(f"deploy-{env}.yml")["steps"]
-    collects = sorted(name for name in steps if name.startswith("collect-"))
-    assert collects == sorted(f"collect-{repo}" for repo in REPOS)
-    for repo in REPOS:
-        step = steps[f"collect-{repo}"]
-        assert step["depends_on"] == ["deploy"]
-        assert (
-            f'./scripts/run-collector.sh {env} "$$(cat .deploy-image)" repo {repo}'
-            in step["commands"]
-        )
-    assert sorted(steps["check"]["depends_on"]) == collects
+    assert sorted(name for name in steps if name.startswith("collect")) == ["collect"]
+    assert steps["collect"]["depends_on"] == ["deploy"]
+    assert (
+        f'./scripts/run-collector.sh {env} "$$(cat .deploy-image)" repos'
+        in steps["collect"]["commands"]
+    )
+    assert steps["check"]["depends_on"] == ["collect"]
     assert (
         f'./scripts/run-collector.sh {env} "$$(cat .deploy-image)" status'
         in (steps["check"]["commands"])
     )
 
 
-def test_the_collect_script_knows_exactly_the_configured_repos() -> None:
-    script = (Path(__file__).resolve().parent.parent / "scripts" / "run-collector.sh").read_text()
-    assert "      v-note | bored | sovereign-config) ;;" in script
-    assert sorted(REPOS) == sorted(["v-note", "bored", "sovereign-config"])
+@pytest.mark.parametrize("env", ["dev", "prod"])
+def test_every_deployment_verifies_the_builds_plugin_image(env: str) -> None:
+    script = "\n".join(_workflow(f"deploy-{env}.yml")["steps"]["verify-image"]["commands"])
+    assert "PLUGIN=registry.desync.link/code-vitals-plugin:$$RELEASE_TAG" in script
+    assert (
+        './scripts/check-image-metadata.sh "$$PLUGIN" "$$RELEASE_TAG" "$$CI_COMMIT_SHA"' in script
+    )
+    assert "> .deploy-plugin-image" in script
 
 
 def test_only_prod_moves_stable_and_only_after_it_is_checked_and_tagged() -> None:
@@ -132,21 +134,41 @@ def test_only_prod_moves_stable_and_only_after_it_is_checked_and_tagged() -> Non
             text = yaml.safe_dump(step)
             if env == "prod" and name == "promote-stable":
                 assert "code-vitals-collector:stable" in text
+                # The tag the measured repos' plugin steps run, by the digest
+                # verify-image recorded.
+                assert "code-vitals-plugin:stable" in text
+                assert "$$(cat .deploy-plugin-image)" in text
             else:
                 assert ":stable" not in text, f"{env}: {name} touches :stable"
 
 
-def test_the_superset_image_is_published_before_the_collector() -> None:
+@pytest.mark.parametrize("image", ["code-vitals-superset", "code-vitals-plugin"])
+def test_every_other_image_is_published_before_the_collector(image: str) -> None:
     # A deployment resolves its build through the collector's :commit-<sha>,
-    # so that tag must only exist once the Superset image is published too.
+    # so that tag must only exist once the build's other images are published.
     commands = _workflow("build.yml")["steps"]["publish-image"]["commands"]
-    superset = next(i for i, c in enumerate(commands) if "code-vitals-superset" in c)
+    other = next(
+        i for i, c in enumerate(commands) if f"IMAGE_REPO=registry.desync.link/{image} " in c
+    )
     collector = next(
         i
         for i, c in enumerate(commands)
         if "publish-release-image.sh" in c and "IMAGE_REPO" not in c
     )
-    assert superset < collector
+    assert other < collector
+
+
+def test_the_plugin_image_is_built_on_the_collector_and_checked_before_publishing() -> None:
+    steps = _workflow("build.yml")["steps"]
+    script = "\n".join(steps["build"]["commands"])
+    assert "-f plugin/Dockerfile" in script
+    assert '--build-arg COLLECTOR_IMAGE="$$IMAGE"' in script
+    assert (
+        './scripts/check-image-metadata.sh "$$PLUGIN" "$$RELEASE_TAG" "$$CI_COMMIT_SHA"' in script
+    )
+    assert './scripts/check-plugin-image.sh "$$PLUGIN" "$$RELEASE_TAG"' in script
+    # publish-image waits on build, so an unchecked plugin is never published.
+    assert "build" in steps["publish-image"]["depends_on"]
 
 
 def test_the_dashboard_import_is_tested_before_anything_is_published() -> None:

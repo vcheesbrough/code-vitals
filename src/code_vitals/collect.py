@@ -1,8 +1,9 @@
 """Catch a repo up: record every trunk commit not yet measured, for every
 registered measure version.
 
-The one entrypoint behind both the deploy-time backfill and the measured
-repos' push workflows. Safe to run concurrently and to interrupt:
+The one entrypoint behind both the deploy-time backfill (backfill.py) and the
+measured repos' plugin steps (plugin.py), which also registers the repo and
+its URL. Safe to run concurrently and to interrupt:
 
 - one advisory lock per repo for the whole run, so an overlapping run waits
   and then finds nothing left to do;
@@ -51,6 +52,10 @@ Conn = psycopg.Connection[tuple[object, ...]]
 class MeasureDefinitionConflict(RuntimeError):
     """A known (name, version) now has a different unit, kind, recomputability
     or definition: it changed without a version bump."""
+
+
+class RepoNameConflict(RuntimeError):
+    """Another repo is already registered under this name, from another URL."""
 
 
 class AreaRulesetConflict(RuntimeError):
@@ -161,14 +166,35 @@ def _collect_from(
         )
 
 
+# A URL compared without a trailing `.git` or `/`, which name the same repo.
+_SAME_URL = r"(\.git)?/*$"
+
+
 def _ensure_repo(conn: Conn, repo: RepoConfig) -> int:
+    """Register the repo, or update its trunk. A repo is registered under its
+    name, which the plugin takes from Woodpecker's CI_REPO_NAME (no owner); a
+    second repo of the same name — a fork, another org — is refused rather
+    than taking over the row, its URL and its history."""
     with obs.db_span("INSERT", "upsert repo"):
         row = conn.execute(
-            "INSERT INTO repo (name, trunk) VALUES (%s, %s)"
-            " ON CONFLICT (name) DO UPDATE SET trunk = EXCLUDED.trunk RETURNING id",
-            (repo.name, repo.trunk),
+            "INSERT INTO repo (name, trunk, url) VALUES (%s, %s, %s)"
+            " ON CONFLICT (name) DO UPDATE SET trunk = EXCLUDED.trunk,"
+            " url = COALESCE(repo.url, EXCLUDED.url)"
+            " WHERE repo.url IS NULL OR EXCLUDED.url IS NULL"
+            " OR regexp_replace(repo.url, %s, '') = regexp_replace(EXCLUDED.url, %s, '')"
+            " RETURNING id",
+            (repo.name, repo.trunk, repo.url, _SAME_URL, _SAME_URL),
         ).fetchone()
-    assert row is not None
+        if row is None:
+            recorded = conn.execute("SELECT url FROM repo WHERE name = %s", (repo.name,)).fetchone()
+            # The writer cannot change a recorded URL; a repo that really moved
+            # (transferred, new forge) is re-pointed by the owner, once.
+            raise RepoNameConflict(
+                f"a repo named {repo.name} is already registered from"
+                f" {recorded[0] if recorded else '?'}; refusing to record {repo.url} under that"
+                " name. If the repo itself moved, as the database owner run"
+                f" `UPDATE repo SET url = '{repo.url}' WHERE name = '{repo.name}'`, then re-run"
+            )
     return int(str(row[0]))
 
 

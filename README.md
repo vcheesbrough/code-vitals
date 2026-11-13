@@ -4,7 +4,8 @@ Measures of a project's code — size, complexity, change and functionality —
 recorded at every trunk commit, so they can be explored over time.
 
 A collector (Python, lizard, tokei), shipped as a container image, runs from
-each project's trunk pipeline and records every trunk commit not yet measured.
+each project's trunk pipeline — one Woodpecker plugin step the project adds
+itself (§ Measuring a repo) — and records every trunk commit not yet measured.
 Measures are versioned plugins: bumping a version recomputes that measure over
 the full git history. Results land in a Postgres star schema and are explored
 in Apache Superset.
@@ -40,6 +41,67 @@ exact command CI uses.
 Changing a pinned measuring tool changes measured values, so it is a measure
 version bump, never a silent update.
 
+`registry.desync.link/code-vitals-plugin` (`plugin/Dockerfile`) is that image
+plus the docker CLI, with `code-vitals plugin` as its entrypoint: the
+Woodpecker plugin of § Measuring a repo. It is built, checked and published with
+the collector under the same version, and starts the collector of that version.
+
+## Measuring a repo
+
+A public repo is measured by adding one step to it, in
+`.woodpecker/code-vitals.yml` — no change to code-vitals and no secrets change
+(the writer password is in the broker's shared layer):
+
+```yaml
+# code-vitals: record this repo's trunk commits (vcheesbrough/code-vitals).
+when:
+  - event: [push, manual]
+    branch: main
+skip_clone: true  # the collector clones the repo itself, with full history
+steps:
+  code-vitals:
+    # Moving tag: code-vitals AGENTS.md § Deviations register.
+    image: registry.desync.link/code-vitals-plugin:stable
+    failure: ignore
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    settings:
+      trunk: main
+      version_sources:            # optional; tried in order, the minor is the iteration
+        - {path: Cargo.toml, kind: cargo-workspace}
+      areas:                      # optional; without it: tests vs everything else
+        version: 1                # bump whenever the rules change
+        rules:
+          - {glob: "crates/**", area: server}
+          - {glob: "frontend/**", area: web}
+      writer_password:
+        from_secret: code_vitals_prod_writer_password
+```
+
+- `trunk` (required): the branch whose first-parent history is measured.
+- `version_sources`: each `{path, kind}`, `kind` one of `cargo-workspace`,
+  `cargo-package`, `pyproject`, `plain`.
+- `areas`: `version` and `rules` (`{glob, area}`, first match wins, area names
+  lower-case words). Shared excludes, the test rules and the `tooling`
+  catch-all are added around them (`src/code_vitals/areas.py`). Changing the
+  rules without a new `version` is refused; a new `version` re-measures the
+  repo's history at the next deploy, and its fixed values in
+  `expected_values.toml`, if any, are skipped until repinned.
+
+The step must be in `.woodpecker/code-vitals.yml` (deployments read its
+settings there; the plugin refuses to run from any other workflow). The plugin
+validates the settings (`src/code_vitals/settings.py`; an unknown or invalid
+setting fails the step with a message naming it), then starts the
+collector on code-vitals' prod network through the socket. The first run
+registers the repo under its name and URL (a second repo of the same name
+from another URL is refused; if the repo itself moved, the database owner
+updates `repo.url`, as the error says) and measures its whole history. Every
+deployment then re-measures it from the same settings, read from that file at
+its trunk head; a repo whose file has no plugin step is skipped. The
+operations and e2e-suite rules of the `functionality` measures are still per
+repo name in `src/code_vitals/measures/functionality.py`, so a new repo has
+none until one is added there (a measure version bump).
+
 ## Versioning
 
 Ported from bored (its `.woodpecker/build.yml`, card #461):
@@ -58,21 +120,22 @@ Ported from bored (its `.woodpecker/build.yml`, card #461):
 
 ```sh
 CODE_VITALS_DATABASE_URL=postgresql://code_vitals_writer:…@code-vitals-db:5432/code_vitals \
-  code-vitals collect --repo bored --clone /path/to/full/clone --trigger push
+CODE_VITALS_SETTINGS='{"trunk": "main", "version_sources": [{"path": "Cargo.toml", "kind": "cargo-workspace"}]}' \
+  code-vitals collect --repo bored --url https://github.com/vcheesbrough/bored.git \
+    --clone /path/to/full/clone --trigger push
 ```
 
-`--fetch` in place of `--clone` clones the repo from its URL in
-`src/code_vitals/repos.py` into a temporary directory first (a failed clone is
-recorded as a failed run). Each measured repo's trunk pushes run this through
-its `.woodpecker/code-vitals.yml`, copied from
-`deploy/measured-repo-workflow.yml` (AGENTS.md § Deviations register).
+`CODE_VITALS_SETTINGS` holds the repo's plugin settings as JSON (§ Measuring a
+repo); the plugin passes them so. `--fetch` in place of `--clone` clones
+`--url` into a temporary directory first (a failed clone is recorded as a
+failed run). `--url` is recorded on the repo for deployments to clone.
 
 Records every trunk commit (first-parent history of the repo's trunk) not yet
 measured, for every registered measure version (`src/code_vitals/measures/`),
 into the database as the writer role. Safe to rerun, to run concurrently (a
 per-repo advisory lock), and to interrupt (each commit is one transaction; the
-next run finishes the rest). The measured repos and their trunks and version
-files are in `src/code_vitals/repos.py`.
+next run finishes the rest). The measured repos are the rows of the `repo`
+table; each registers itself on its plugin step's first run.
 
 A run with no failed commit records that the repo is caught up on every
 version it ran (`measure_backfill`). A version turns `complete` once every
@@ -82,16 +145,22 @@ non-recomputable measure version is recorded only at commits from its
 release on (`measure_recomputable` and `measure_released_at` in
 `current_measurement` mark the break).
 
-Every deployment runs this over every repo with the deployed image, then
-checks (`scripts/run-collector.sh`):
+Every deployment runs this over every registered repo with the deployed
+image, in parallel, then checks (`scripts/run-collector.sh`):
 
-- `code-vitals check-repo --repo R --clone P` — a second catch-up finds
-  nothing to do, and the values at the fixed commits of
-  `src/code_vitals/expected_values.toml` are exactly those recorded. A change
-  that alters values bumps the measure's version and updates the table in the
-  same PR; on a mismatch the command prints the recorded entries to paste.
-- `code-vitals check-status` — every version this build registers, and every
-  repo's ruleset, is `complete`, and every repo's last run succeeded.
+- `code-vitals list-repos` — the registered repos and their URLs.
+- `code-vitals backfill-repo --repo R --url U --trunk T` — clones the repo,
+  reads its plugin settings from `.woodpecker/code-vitals.yml` at the trunk
+  head (no plugin step: skipped, exit 3), collects with trigger `backfill`,
+  then checks: a second catch-up finds nothing to do, the repo's area ruleset
+  is `complete`, and the values at its fixed commits in
+  `src/code_vitals/expected_values.toml` (a repo without an entry has none)
+  are exactly those recorded. A change that alters values bumps the measure's
+  version and updates the table in the same PR; on a mismatch the command
+  prints the recorded entries to paste.
+- `code-vitals check-status --repo R …` — every version this build registers
+  is `complete`, and the last run of every repo collected (not skipped)
+  succeeded.
 
 `code-vitals retire <measure> <version> [--delete-rows]` retires a version this
 build no longer registers: it leaves the views; `--delete-rows` also deletes
@@ -106,7 +175,7 @@ be on the stack network and `proxy-backend`.
 ## Measures
 
 Snapshot measures, recorded at every trunk commit and split by area
-(`src/code_vitals/repos.py` holds each repo's versioned area rules; shared
+(each repo's versioned area rules are in its plugin settings; shared
 excludes and test rules in `src/code_vitals/areas.py`):
 
 | Measure | Tool | Facet | What |
@@ -217,8 +286,9 @@ A Woodpecker *Deploy* of a commit, with target `dev` (any branch) or `prod`
 rebuilds. Each dev deploy starts from a fresh copy of prod. After migrating,
 it collects and checks every repo (§ Collecting), so a bumped measure version
 backfills in dev from the branch and in prod on release. A prod deploy moves
-`code-vitals-collector:stable` — what the measured repos' push workflows run —
-last, once its checks passed. See AGENTS.md § Environments and promotion.
+`code-vitals-plugin:stable` — what the measured repos' plugin steps run — and
+`code-vitals-collector:stable` last, once its checks passed. See AGENTS.md
+§ Environments and promotion.
 
 ## License
 

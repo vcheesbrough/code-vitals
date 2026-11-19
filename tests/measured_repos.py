@@ -87,6 +87,7 @@ skip_clone: true
 steps:
   code-vitals:
     image: registry.desync.link/code-vitals-plugin:stable
+    pull: true  # the tag moves: without it an agent keeps its cached image
     failure: ignore
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

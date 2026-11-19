@@ -1,6 +1,8 @@
 """The one validator of a repo's plugin settings, from each place they arrive."""
 
 import json
+import re
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -76,6 +78,43 @@ def test_the_plugin_env_reads_as_woodpecker_encodes_it(repo: str) -> None:
 @pytest.mark.parametrize("repo", sorted(SETTINGS_YAML))
 def test_the_workflow_file_reads_the_same_settings(repo: str) -> None:
     assert settings.from_workflow(workflow(repo)) == MEASURED[repo]
+
+
+def _readme_step() -> tuple[str, dict[str, Any]]:
+    """The example workflow of README § Measuring a repo, and its plugin step."""
+    readme = (Path(__file__).parent.parent / "README.md").read_text()
+    section = readme.split("\n## Measuring a repo\n", 1)[1].split("\n## ", 1)[0]
+    found = re.search(r"```yaml\n(.*?)```", section, re.DOTALL)
+    assert found is not None
+    text = found.group(1)
+    step: dict[str, Any] = yaml.safe_load(text)["steps"]["code-vitals"]
+    return text, step
+
+
+def test_the_readme_step_parses() -> None:
+    text, _ = _readme_step()
+    found = settings.from_workflow(text)
+    assert found is not None
+    assert found.trunk == "main"
+
+
+def test_the_readme_step_always_pulls_the_moving_tag() -> None:
+    # Woodpecker pulls a step image only when the agent lacks it; `:stable`
+    # moves on every prod deploy, so without `pull: true` an agent would keep
+    # running the plugin (and the collector of its version) it has cached.
+    _, step = _readme_step()
+    assert step["image"] == "registry.desync.link/code-vitals-plugin:stable"
+    assert step["pull"] is True
+
+
+@pytest.mark.parametrize("repo", sorted(SETTINGS_YAML))
+def test_the_workflow_file_is_the_readme_step_around_its_settings(repo: str) -> None:
+    _, documented = _readme_step()
+    step: dict[str, Any] = yaml.safe_load(workflow(repo))["steps"]["code-vitals"]
+    assert step["pull"] is True
+    for key in ("image", "pull", "failure", "volumes"):
+        assert step[key] == documented[key]
+    assert step["settings"]["writer_password"] == documented["settings"]["writer_password"]
 
 
 def test_a_list_of_steps_is_read_too() -> None:

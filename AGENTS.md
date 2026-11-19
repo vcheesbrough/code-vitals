@@ -128,7 +128,8 @@ Two environments on mini, each its own compose project of `deploy/compose.yaml`:
   `dashboard`, `tests`, `tooling`); changing them bumps `areas.version` in
   that file and repins its two commits in `expected_values.toml` in the same
   PR — here the measured repo and the table are one repo, so there is no
-  reason for the table to lag. `tests/measured_repos.py` carries a copy of
+  reason for the table to lag (`tests/test_pipelines.py` pins v1's rules, so
+  an edit without a bump fails the build). `tests/measured_repos.py` carries a copy of
   the settings that `tests/test_pipelines.py` holds equal to the file.
   Only the `functionality` measures' operations/e2e-suite rules stay keyed by
   repo name in `src/code_vitals/measures/functionality.py` (moving them would

@@ -294,6 +294,25 @@ def test_the_self_measuring_settings_pass_the_shared_validator() -> None:
     assert settings.from_json(found.as_json()) == found
 
 
+# Ruleset v1 as registered. Changing the rules means a new version (and a
+# repin in expected_values.toml), never an edit to this tuple.
+CODE_VITALS_RULESET_V1 = (
+    ("scripts/test-*.sh", "tests"),
+    ("superset/*_test.py", "tests"),
+    ("src/code_vitals/expected_values.toml", "tests"),
+    ("src/**", "collector"),
+    ("superset/**", "dashboard"),
+)
+
+
+def test_a_rule_change_bumps_this_repos_ruleset() -> None:
+    # The collector refuses a known ruleset version whose rules changed, but
+    # only after merge, behind `failure: ignore`; this fails the build instead.
+    found = MEASURED["code-vitals"]
+    if found.areas.version == 1:
+        assert found.area_rules == CODE_VITALS_RULESET_V1
+
+
 def test_this_repo_has_no_operations_or_suite_rules() -> None:
     # Decided on card #562: it serves no routes or tools and has no e2e suite
     # in those measures' sense. Adding rules is a measure version bump.

@@ -31,6 +31,9 @@ steps:
           # what they test, so they need rules.
           - {glob: "scripts/test-*.sh", area: tests}
           - {glob: "superset/*_test.py", area: tests}
+          # The deploy check's pinned values are check data, not collector
+          # code: as `collector` every repin would read as collector growth.
+          - {glob: "src/code_vitals/expected_values.toml", area: tests}
           - {glob: "src/**", area: collector}
           - {glob: "superset/**", area: dashboard}
           # Everything else — .woodpecker/, scripts/, deploy/, authentik/,

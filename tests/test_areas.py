@@ -67,6 +67,8 @@ def test_test_code_is_tests_in_every_repo(path: str) -> None:
         # Tests that sit beside what they test, by the repo's own rules.
         ("code-vitals", "scripts/test-run-collector.sh", "tests"),
         ("code-vitals", "superset/dashboard_import_test.py", "tests"),
+        # The deploy check's pinned values: check data, not collector code.
+        ("code-vitals", "src/code_vitals/expected_values.toml", "tests"),
         ("code-vitals", "scripts/run-collector.sh", "tooling"),
         ("code-vitals", ".woodpecker/build.yml", "tooling"),
         ("code-vitals", "deploy/compose.yaml", "tooling"),

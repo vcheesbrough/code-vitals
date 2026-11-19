@@ -108,7 +108,8 @@ none until one is added there (a measure version bump).
 
 code-vitals measures itself the same way (card #562): its own
 `.woodpecker/code-vitals.yml` runs beside the build on every `main` push,
-never gating it, with areas `collector` (`src/`), `dashboard` (`superset/`),
+never gating it, with areas `collector` (`src/`, but the pinned values in
+`expected_values.toml`, which are `tests`), `dashboard` (`superset/`),
 `tests` and `tooling`, and no operations or e2e-suite rules. Two of its
 commits are pinned in `expected_values.toml` like the other repos'.
 

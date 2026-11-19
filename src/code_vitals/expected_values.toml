@@ -878,13 +878,13 @@ version = 1
 version = 1
 "collector/Python" = 2915
 "collector/SQL" = 296
-"collector/TOML" = 662
 "dashboard/Dockerfile" = 22
 "dashboard/Python" = 562
 "dashboard/Shell" = 7
 "dashboard/YAML" = 2659
 "tests/Python" = 4242
 "tests/Shell" = 961
+"tests/TOML" = 662
 "tooling/Dockerfile" = 81
 "tooling/Markdown" = 21
 "tooling/Plain Text" = 0
@@ -896,13 +896,13 @@ version = 1
 version = 1
 "collector/Python" = 24
 "collector/SQL" = 7
-"collector/TOML" = 1
 "dashboard/Dockerfile" = 1
 "dashboard/Python" = 3
 "dashboard/Shell" = 1
 "dashboard/YAML" = 24
 "tests/Python" = 29
 "tests/Shell" = 10
+"tests/TOML" = 1
 "tooling/Dockerfile" = 2
 "tooling/Markdown" = 4
 "tooling/Plain Text" = 1
@@ -945,20 +945,20 @@ version = 1
 
 [code-vitals.commits.631ea888851c70e8408880c2e9346ba26dd20daa.lines_added]
 version = 1
-"collector" = 724
-"tests" = 1082
+"collector" = 720
+"tests" = 1086
 "tooling" = 422
 
 [code-vitals.commits.631ea888851c70e8408880c2e9346ba26dd20daa.lines_deleted]
 version = 1
-"collector" = 128
-"tests" = 308
+"collector" = 126
+"tests" = 310
 "tooling" = 242
 
 [code-vitals.commits.631ea888851c70e8408880c2e9346ba26dd20daa.files_changed]
 version = 1
-"collector" = 9
-"tests" = 13
+"collector" = 8
+"tests" = 14
 "tooling" = 10
 
 [code-vitals.commits.631ea888851c70e8408880c2e9346ba26dd20daa.operations]

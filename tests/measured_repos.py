@@ -27,6 +27,7 @@ areas:
   rules:
     - {glob: "scripts/test-*.sh", area: tests}
     - {glob: "superset/*_test.py", area: tests}
+    - {glob: "src/code_vitals/expected_values.toml", area: tests}
     - {glob: "src/**", area: collector}
     - {glob: "superset/**", area: dashboard}
 """,

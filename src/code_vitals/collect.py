@@ -16,10 +16,17 @@ its URL. Safe to run concurrently and to interrupt:
 
 A run with no failed commit has measured every trunk commit up to the head it
 started from, for every version it ran: it records that per repo
-(`measure_backfill`), and a version every repo has finished turns `complete`,
-which is when the current_* views switch to it. So does the repo's area
-ruleset. A non-recomputable version is measured only at commits from its
+(`measure_backfill`), and a version every *active* repo has finished turns
+`complete`, which is when the current_* views switch to it. So does the repo's
+area ruleset. A non-recomputable version is measured only at commits from its
 release on.
+
+A repo a deployment cannot re-measure (no plugin step, no URL) is *skipped*
+(`repo.skipped_at`, set by skip_repo): it stops counting toward completion, so
+it cannot hold a new version at `backfilling` forever, and the views keep
+showing its history at the versions it had finished. The run that next catches
+it up on every registered version makes it active again — only then, so it
+counts again exactly when it has every version it missed.
 
 A run row exists from the moment the repo is known, so every failure after
 that — a bad clone, a changed measure definition — is recorded too.
@@ -523,31 +530,79 @@ def _complete_backfill(
     ruleset_id: int,
 ) -> None:
     """Record that this repo is caught up on these versions, then complete
-    every one of them that every repo is caught up on. One UPDATE completes
-    them all, so the views switch together; and runs for different repos
-    cannot both miss the last row, since each inserts (and commits) before its
-    UPDATE reads. "Every repo" is every repo row: on an empty database a repo
-    not yet registered does not count, which is harmless — there is no older
-    version for the views to switch away from."""
+    every one of them that every active repo is caught up on. One UPDATE
+    completes them all, so the views switch together; and runs for different
+    repos cannot both miss the last row, since each inserts (and commits)
+    before its UPDATE reads. "Every active repo" is every repo row not
+    skipped: on an empty database a repo not yet registered does not count,
+    which is harmless — there is no older version for the views to switch
+    away from.
+
+    A skipped repo is caught up on every registered version here, so this is
+    where it becomes active again — after its backfill rows, before the
+    UPDATE, so it counts in the same statement."""
     with obs.db_span("INSERT", "record backfill"), conn.cursor() as cur:
         cur.executemany(
             "INSERT INTO measure_backfill (repo_id, measure_id, head_sha, run_id)"
             " VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING",
             [(repo_id, measure_id, head, run_id) for measure_id in measure_ids],
         )
-    with obs.db_span("UPDATE", "complete measures"):
-        conn.execute(
-            "UPDATE measure m SET status = 'complete'"
-            " WHERE m.id = ANY(%s) AND m.status = 'backfilling'"
-            " AND NOT EXISTS (SELECT 1 FROM repo r WHERE NOT EXISTS ("
-            "  SELECT 1 FROM measure_backfill b WHERE b.repo_id = r.id AND b.measure_id = m.id))",
-            (list(measure_ids),),
-        )
+    with obs.db_span("UPDATE", "reactivate repo"):
+        returned = conn.execute(
+            "UPDATE repo SET skipped_at = NULL WHERE id = %s AND skipped_at IS NOT NULL"
+            " RETURNING name",
+            (repo_id,),
+        ).fetchone()
+    if returned is not None:
+        log.info("%s is caught up on every version again; no longer skipped", returned[0])
+    _complete_measures(conn, list(measure_ids))
     with obs.db_span("UPDATE", "complete ruleset"):
         conn.execute(
             "UPDATE area_ruleset SET status = 'complete' WHERE id = %s AND status = 'backfilling'",
             (ruleset_id,),
         )
+
+
+def _complete_measures(conn: Conn, measure_ids: Sequence[int] | None) -> None:
+    """Complete the backfilling versions (all of them, or those named) that
+    every active repo has backfilled. At least one active repo must have: a
+    version nobody measured has nothing for the views to switch to."""
+    with obs.db_span("UPDATE", "complete measures"):
+        conn.execute(
+            "UPDATE measure m SET status = 'complete'"
+            " WHERE m.status = 'backfilling' AND (%s::integer[] IS NULL OR m.id = ANY(%s))"
+            " AND EXISTS (SELECT 1 FROM measure_backfill b JOIN repo r ON r.id = b.repo_id"
+            "  WHERE b.measure_id = m.id AND r.skipped_at IS NULL)"
+            " AND NOT EXISTS (SELECT 1 FROM repo r WHERE r.skipped_at IS NULL AND NOT EXISTS ("
+            "  SELECT 1 FROM measure_backfill b WHERE b.repo_id = r.id AND b.measure_id = m.id))",
+            (measure_ids, measure_ids),
+        )
+
+
+def skip_repo(conninfo: str, name: str) -> bool:
+    """Mark a registered repo skipped: a deployment could not re-measure it
+    (no plugin step, or no URL). It stops counting toward completing a measure
+    version, so every backfilling version that was waiting only for it
+    completes now — whichever of this and the other repos' runs commits last
+    sees the other, as in _complete_backfill. Its rows stay, and stay visible
+    (migration 0007). Returns whether it was newly marked; the first mark's
+    time is kept."""
+    with psycopg.connect(conninfo, autocommit=True) as conn:
+        with obs.db_span("UPDATE", "skip repo"):
+            newly = conn.execute(
+                "UPDATE repo SET skipped_at = now() WHERE name = %s AND skipped_at IS NULL"
+                " RETURNING id",
+                (name,),
+            ).fetchone()
+        _complete_measures(conn, None)
+    if newly is not None:
+        log.warning(
+            "%s is now skipped: it no longer counts toward completing a measure version, and"
+            " its recorded history stays as it is until a run catches it up again",
+            name,
+            extra={obs.REPO: name},
+        )
+    return newly is not None
 
 
 def _iteration_at(clone: Clone, repo: RepoConfig, sha: str) -> int | None:

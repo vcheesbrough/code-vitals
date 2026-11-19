@@ -103,7 +103,11 @@ Two environments on mini, each its own compose project of `deploy/compose.yaml`:
   (`scripts/run-collector.sh`: `list-repos`, then `backfill-repo` — clone,
   read the repo's plugin settings from its `.woodpecker/code-vitals.yml` at
   the trunk head, `collect --trigger backfill`, check). A repo without the
-  plugin step is skipped with a log line, not failed. Then `check` runs
+  plugin step is skipped with a log line, not failed, and marked
+  (`repo.skipped_at`, card #572): a skipped repo does not hold a new measure
+  version at `backfilling`, its history stays in the views frozen at the
+  versions it had caught up on, and its next run that catches it up on every
+  registered version makes it active again (README § Collecting). Then `check` runs
   `check-status` over the repos collected; `tag-release` waits on it. A
   measure or ruleset bump therefore backfills in dev from the branch and in
   prod on release, and a measure bump must update

@@ -16,10 +16,13 @@ from code_vitals.db.migrate import bundled_migrations, migrate
 from code_vitals.gitrepo import Clone
 from code_vitals.measures import Measure
 from code_vitals.measures.files import Files
+from code_vitals.obs import Trigger
+from code_vitals.repos import RepoConfig
 from code_vitals.settings import WORKFLOW_PATH, SettingsError
 
 from .conftest import TEST_PASSWORDS, role_url
 from .gitfixture import FixtureRepo, three_commit_history
+from .test_collect import FilesV2
 
 BUILD = BuildInfo(version="0.13.99", revision="abc123")
 ONLY_FILES: list[Measure] = [Files()]
@@ -139,6 +142,55 @@ def test_a_repo_without_the_plugin_step_is_skipped(db: tuple[str, str], bare: Fi
     )
     assert result.outcome is Outcome.SKIPPED
     assert _rows(owner, "SELECT count(*) FROM run") == [(0,)]
+    # Marked, so new measure versions complete without it (card #572).
+    assert _rows(owner, "SELECT name, skipped_at IS NOT NULL FROM repo") == [("bare", True)]
+
+
+def test_a_measure_bump_deploys_while_a_registered_repo_is_skipped(
+    db: tuple[str, str], repo: FixtureRepo, bare: FixtureRepo
+) -> None:
+    """The card's first acceptance criterion, through the deployment's own
+    steps: backfill every registered repo, then check-status."""
+    owner, writer = db
+    v1: list[Measure] = [Files()]
+    v2: list[Measure] = [FilesV2()]
+    # Both were measured at v1 by runs of their own, as `bare`'s plugin step
+    # made before it dropped the step.
+    for name, fixture in (("fixture", repo), ("bare", bare)):
+        collect_module.collect(
+            writer,
+            RepoConfig(name, "main", (), url=str(fixture.path)),
+            fixture.path,
+            Trigger.PUSH,
+            BUILD,
+            measures=v1,
+        )
+
+    results = [
+        backfill_repo(writer, RegisteredRepo(name, str(fixture.path), "main"), BUILD, measures=v2)
+        for name, fixture in (("fixture", repo), ("bare", bare))
+    ]
+
+    assert [r.outcome for r in results] == [Outcome.CHECKED, Outcome.SKIPPED]
+    assert _rows(owner, "SELECT version, status::text FROM measure ORDER BY version") == [
+        (1, "complete"),
+        (2, "complete"),
+    ]
+    assert checks.check_status(writer, ["fixture"], measures=v2) == []
+    assert _rows(
+        owner, "SELECT DISTINCT repo, measure_version FROM current_measurement ORDER BY repo"
+    ) == [("bare", 1), ("fixture", 2)]
+
+    # `bare` adds the step: the next deployment backfills v2 over its whole
+    # history, and it is active again.
+    bare.commit("Measure me", {WORKFLOW_PATH: WORKFLOW})
+    back = backfill_repo(writer, RegisteredRepo("bare", str(bare.path), "main"), BUILD, measures=v2)
+    assert back.outcome is Outcome.CHECKED and back.problems == ()
+    assert back.collected is not None and back.collected.commits_measured == 4
+    assert _rows(owner, "SELECT count(*) FROM repo WHERE skipped_at IS NOT NULL") == [(0,)]
+    assert _rows(
+        owner, "SELECT DISTINCT repo, measure_version FROM current_measurement ORDER BY repo"
+    ) == [("bare", 2), ("fixture", 2)]
 
 
 def test_invalid_settings_fail_the_repo(db: tuple[str, str], repo: FixtureRepo) -> None:
@@ -164,6 +216,8 @@ def test_cli_lists_repos_for_the_deploy_script(
     assert "repo v-note https://x/v.git master" in out
     assert "code-vitals list-repos: old has no URL; deployments skip it" in out
     assert not any(line.startswith("repo old") for line in out)
+    # No deployment can clone it, so it must not hold a measure version back.
+    assert _rows(owner, "SELECT name FROM repo WHERE skipped_at IS NOT NULL") == [("old",)]
 
 
 @pytest.fixture

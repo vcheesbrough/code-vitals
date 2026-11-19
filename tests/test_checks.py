@@ -17,7 +17,7 @@ from code_vitals.checks import (
     load_expected,
     render,
 )
-from code_vitals.collect import collect
+from code_vitals.collect import collect, skip_repo
 from code_vitals.db.migrate import migrate
 from code_vitals.measures import Measure, registered
 from code_vitals.measures.files import Files
@@ -291,6 +291,23 @@ def test_status_fails_on_incomplete_versions_and_failed_or_missing_runs(
     assert problems[3:] == ["absent has no collector run"]
     # A repo the deployment skipped is not named, so its failed run is not checked.
     assert check_status(writer, [], measures=[]) == []
+
+
+def test_status_does_not_check_versions_when_no_repo_is_active(
+    db: tuple[str, str], repo: FixtureRepo, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Every registered repo skipped (or none registered): nothing ran, so a
+    # version this build adds is not even registered. Not a failed deployment.
+    _, writer = db
+    assert check_status(writer, [], measures=[Empty()]) == []
+    _collected(writer, repo)
+    assert check_status(writer, [], measures=[Empty()]) == [
+        "measure empty v1 is not registered, not complete"
+    ]
+    skip_repo(writer, "fixture")
+    caplog.clear()
+    assert check_status(writer, [], measures=[Empty()]) == []
+    assert "no registered repo is active" in caplog.text
 
 
 def test_the_bundled_table_covers_every_repo_and_measure_this_build_has() -> None:

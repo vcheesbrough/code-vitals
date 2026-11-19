@@ -7,7 +7,9 @@ its URL, reads the settings of the code-vitals plugin step in
 `.woodpecker/code-vitals.yml` at the trunk head, catches it up with
 trigger=backfill and checks it (checks.check_repo). A repo whose workflow has
 no plugin step (any more, or not yet) is skipped, not failed: it says so in
-the step log and is left out of check-status.
+the step log, is left out of check-status, and is marked skipped in the
+database (collect.skip_repo), so new measure versions complete without it
+until one of its runs catches it up again.
 """
 
 import contextlib
@@ -23,7 +25,7 @@ import psycopg
 from code_vitals import obs, settings
 from code_vitals.build_info import BuildInfo
 from code_vitals.checks import check_repo
-from code_vitals.collect import RunResult, collect
+from code_vitals.collect import RunResult, collect, skip_repo
 from code_vitals.gitrepo import Clone, clone_from
 from code_vitals.measures import Measure
 from code_vitals.settings import Settings
@@ -81,8 +83,8 @@ def backfill_repo(
     measures: Sequence[Measure] | None = None,
     pipeline_number: str | None = None,
 ) -> BackfillResult:
-    """Clone the repo, then skip it or catch it up and check it. Raises for a
-    clone that fails or settings that are invalid."""
+    """Clone the repo, then skip it (and mark it skipped) or catch it up and
+    check it. Raises for a clone that fails or settings that are invalid."""
     if repo.url is None:
         raise ValueError(f"{repo.name} has no URL to clone")
     with contextlib.ExitStack() as stack:
@@ -91,6 +93,7 @@ def backfill_repo(
         found = settings_at_trunk(clone, repo.trunk)
         if found is None:
             log.info("%s has no code-vitals plugin step; skipped", repo.name)
+            skip_repo(conninfo, repo.name)
             return BackfillResult(Outcome.SKIPPED)
         config = found.repo(repo.name, repo.url)
         collected = collect(

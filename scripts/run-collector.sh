@@ -9,7 +9,9 @@
 #       catches it up with trigger=backfill and checks it (a second catch-up
 #       finds nothing; its fixed-commit values, if any, match
 #       src/code_vitals/expected_values.toml). A repo without the plugin step
-#       is skipped, not failed. The repos collected are written to
+#       is skipped, not failed, and `backfill-repo` marks it skipped in the
+#       database so measure versions complete without it (card #572). The
+#       repos collected are written to
 #       .collected-repos for `status`. Each repo's runs are serialized by its
 #       advisory lock.
 #   run-collector.sh <dev|prod> <collector-image-ref> status

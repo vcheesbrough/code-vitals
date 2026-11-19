@@ -123,6 +123,40 @@ def test_freshness_reports_the_newest_recorded_commit_and_last_run(db: str) -> N
     assert rows == [("bored", SHA_2, "success"), ("v-note", None, None)]
 
 
+def test_freshness_says_which_repos_are_skipped(db: str) -> None:
+    _seed(db)
+    with psycopg.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO repo (id, name, trunk, skipped_at)"
+            " VALUES (2, 'v-note', 'master', '2026-11-19T12:00Z')"
+        )
+        rows = conn.execute(
+            "SELECT repo, skipped_at IS NOT NULL FROM freshness ORDER BY repo"
+        ).fetchall()
+    assert rows == [("bored", False), ("v-note", True)]
+
+
+def test_a_skipped_repo_shows_the_newest_complete_version_it_backfilled(db: str) -> None:
+    _seed(db)
+    with psycopg.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO run (id, repo_id, trigger, collector_version, collector_revision)"
+            " VALUES (1, 1, 'push', '0.2.5', 'abc')"
+        )
+        conn.execute(
+            "INSERT INTO measure_backfill (repo_id, measure_id, head_sha, run_id)"
+            " VALUES (1, 1, %s, 1)",
+            (SHA_2,),
+        )
+        # v2 completed without the repo (it has a stray v2 row, no backfill).
+        conn.execute("UPDATE measure SET status = 'complete' WHERE id = 2")
+        conn.execute("UPDATE repo SET skipped_at = now()")
+        frozen = conn.execute("SELECT DISTINCT measure_version FROM current_measurement").fetchall()
+        conn.execute("UPDATE repo SET skipped_at = NULL")
+        active = conn.execute("SELECT DISTINCT measure_version FROM current_measurement").fetchall()
+    assert (frozen, active) == ([(1,)], [(2,)])
+
+
 @pytest.mark.parametrize(
     "statement",
     [

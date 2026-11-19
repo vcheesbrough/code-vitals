@@ -19,7 +19,7 @@ from code_vitals import obs, plugin, settings, telemetry
 from code_vitals.backfill import Outcome, RegisteredRepo, backfill_repo, registered_repos
 from code_vitals.build_info import BuildInfo, load_build_info
 from code_vitals.checks import check_status
-from code_vitals.collect import collect
+from code_vitals.collect import collect, skip_repo
 from code_vitals.db.migrate import migrate
 from code_vitals.repos import RepoConfig
 from code_vitals.retire import RetireRefused, retire
@@ -87,7 +87,10 @@ def build_parser(info: BuildInfo) -> argparse.ArgumentParser:
     commands.add_parser(
         "list-repos",
         help="list the registered repos a deployment re-measures",
-        description="One `repo <name> <url> <trunk>` line per registered repo with a URL.",
+        description=(
+            "One `repo <name> <url> <trunk>` line per registered repo with a URL. A repo"
+            " without one is marked skipped."
+        ),
     )
     backfill_parser = commands.add_parser(
         "backfill-repo",
@@ -97,7 +100,8 @@ def build_parser(info: BuildInfo) -> argparse.ArgumentParser:
             f" {settings.WORKFLOW_PATH} at the trunk head, catch it up with"
             " trigger=backfill, then check it: a second catch-up must find nothing to do,"
             " and the values at its fixed commits of expected_values.toml (if any) must"
-            f" match. Exits {SKIPPED_EXIT} when the repo has no plugin step (skipped)."
+            f" match. Exits {SKIPPED_EXIT} when the repo has no plugin step: it is marked"
+            " skipped, so measure versions complete without it until it is caught up again."
         ),
     )
     backfill_parser.add_argument("--repo", required=True, type=_repo_name)
@@ -107,8 +111,9 @@ def build_parser(info: BuildInfo) -> argparse.ArgumentParser:
         "check-status",
         help="check the repos a deployment collected",
         description=(
-            "Every measure version this build registers must be complete, and the last run"
-            " of every repo named must have succeeded."
+            "Every measure version this build registers must be complete (unless every"
+            " registered repo is skipped), and the last run of every repo named must have"
+            " succeeded."
         ),
     )
     status_parser.add_argument("--repo", action="append", default=[], type=_repo_name)
@@ -270,6 +275,10 @@ def _report(command: str, problems: Sequence[str]) -> int:
 def _list_repos(conninfo: str) -> int:
     with obs.tracer.start_as_current_span("list-repos"):
         repos = registered_repos(conninfo)
+        for repo in repos:
+            if repo.url is None:
+                # Never cloned by a deployment, so never backfilled by one.
+                skip_repo(conninfo, repo.name)
     for repo in repos:
         if repo.url is None:
             print(f"code-vitals list-repos: {repo.name} has no URL; deployments skip it")

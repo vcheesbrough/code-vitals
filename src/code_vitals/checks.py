@@ -10,7 +10,9 @@
   Non-recomputable measures are not in the table (fixed_value_measures).
 - check_status, once every repo is collected: every version this build
   registers is `complete` (so the views show it), and the last run of every
-  repo collected succeeded.
+  repo collected succeeded. Skipped repos do not hold a version back
+  (collect.skip_repo); when every registered repo is skipped nothing can
+  backfill a version, so the versions are not checked.
 """
 
 import logging
@@ -272,10 +274,19 @@ def check_status(
                 "SELECT name, version, status::text FROM measure"
             )
         }
-        for m in measures:
-            state = status.get((m.name, m.version), "not registered")
-            if state != "complete":
-                problems.append(f"measure {m.name} v{m.version} is {state}, not complete")
+        active = conn.execute("SELECT count(*) FROM repo WHERE skipped_at IS NULL").fetchone()
+        if active is not None and active[0]:
+            for m in measures:
+                state = status.get((m.name, m.version), "not registered")
+                if state != "complete":
+                    problems.append(f"measure {m.name} v{m.version} is {state}, not complete")
+        else:
+            # Nothing was collected, so nothing could register or backfill a
+            # version; the views keep what they had.
+            log.warning(
+                "no registered repo is active (all skipped, or none registered):"
+                " measure versions not checked"
+            )
         for name in repos:
             last = conn.execute(
                 "SELECT run.id, run.outcome::text FROM run JOIN repo r ON r.id = run.repo_id"

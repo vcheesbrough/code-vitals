@@ -101,7 +101,9 @@ registers the repo under its name and URL (a second repo of the same name
 from another URL is refused; if the repo itself moved, the database owner
 updates `repo.url`, as the error says) and measures its whole history. Every
 deployment then re-measures it from the same settings, read from that file at
-its trunk head; a repo whose file has no plugin step is skipped. The
+its trunk head; a repo whose file has no plugin step is skipped (§
+Collecting: it stops holding new measure versions back, and its history stays
+visible). The
 operations and e2e-suite rules of the `functionality` measures are still per
 repo name in `src/code_vitals/measures/functionality.py`, so a new repo has
 none until one is added there (a measure version bump).
@@ -150,8 +152,8 @@ table; each registers itself on its plugin step's first run.
 
 A run with no failed commit records that the repo is caught up on every
 version it ran (`measure_backfill`). A version turns `complete` once every
-repo has caught up on it, and a repo's area ruleset once a run under it
-succeeds; that is when the `current_*` views switch to them. A
+*active* repo has caught up on it, and a repo's area ruleset once a run under
+it succeeds; that is when the `current_*` views switch to them. A
 non-recomputable measure version is recorded only at commits from its
 release on (`measure_recomputable` and `measure_released_at` in
 `current_measurement` mark the break).
@@ -162,7 +164,7 @@ image, in parallel, then checks (`scripts/run-collector.sh`):
 - `code-vitals list-repos` — the registered repos and their URLs.
 - `code-vitals backfill-repo --repo R --url U --trunk T` — clones the repo,
   reads its plugin settings from `.woodpecker/code-vitals.yml` at the trunk
-  head (no plugin step: skipped, exit 3), collects with trigger `backfill`,
+  head (no plugin step: marked skipped, exit 3), collects with trigger `backfill`,
   then checks: a second catch-up finds nothing to do, the repo's area ruleset
   is `complete`, and the values at its fixed commits in
   `src/code_vitals/expected_values.toml` (a repo without an entry has none)
@@ -172,6 +174,23 @@ image, in parallel, then checks (`scripts/run-collector.sh`):
 - `code-vitals check-status --repo R …` — every version this build registers
   is `complete`, and the last run of every repo collected (not skipped)
   succeeded.
+
+A repo a deployment cannot re-measure — no plugin step at its trunk head, or
+no URL — is **skipped** (`repo.skipped_at`, set by `backfill-repo` and
+`list-repos`). A skipped repo does not count toward completing a version, so
+a measure bump completes and deploys while it is away. Its history stays in
+the views, frozen at the newest complete version of each measure it had
+caught up on (so its charts can be one version behind the other repos';
+`measure_version` says which), and `freshness.skipped_at` says since when.
+Nothing un-skips it by hand: a run with no failed commit — its own plugin
+step's, or a deployment's once the step is back — measures every registered
+version at every trunk commit, and makes it active again once it has caught
+up on every version the views show, at which point its charts switch to the
+current versions whole. A clean run of an older collector, which lacks a
+newer current version, leaves it skipped; so does a current version no build
+registers any more, until it is retired (`code-vitals retire`). When
+every registered repo is skipped, `check-status` does not check the versions
+(nothing could backfill them).
 
 `code-vitals retire <measure> <version> [--delete-rows]` retires a version this
 build no longer registers: it leaves the views; `--delete-rows` also deletes
@@ -229,7 +248,9 @@ get their login.
 | `code_vitals_reader` (Superset) | `SELECT` on `current_measurement`, `current_function_complexity` and `freshness` only |
 
 The `current_*` views show only measure versions and area rulesets whose
-backfill is `complete`, so a chart never mixes two definitions of a measure.
+backfill is `complete`, so a chart never mixes two definitions of a measure
+within a repo. A skipped repo (§ Collecting) stays at the versions it had
+caught up on.
 
 ## Superset
 

@@ -19,6 +19,7 @@ from code_vitals.collect import (
     RepoNameConflict,
     collect,
     lock_key,
+    skip_repo,
 )
 from code_vitals.db.migrate import migrate
 from code_vitals.gitrepo import GitError
@@ -572,6 +573,180 @@ def test_a_version_completes_only_once_every_repo_has_backfilled_it(
     collect(writer, other, second.path, Trigger.BACKFILL, BUILD, measures=[FilesV2()])
     assert _rows(owner, "SELECT status::text FROM measure WHERE version = 2") == [("complete",)]
     assert {(v[0], v[1]) for v in _view(owner)} == {("fixture", 2), ("other", 2)}
+
+
+def _two_repos(writer: str, tmp_path: Path) -> tuple[FixtureRepo, RepoConfig, FixtureRepo]:
+    """`fixture` and `other`, both caught up on files v1."""
+    (tmp_path / "first").mkdir()
+    (tmp_path / "second").mkdir()
+    first = three_commit_history(tmp_path / "first")
+    second = three_commit_history(tmp_path / "second")
+    other = RepoConfig("other", "main", FIXTURE.version_sources)
+    for config, clone in ((FIXTURE, first), (other, second)):
+        collect(writer, config, clone.path, Trigger.BACKFILL, BUILD, measures=ONLY_FILES)
+    return first, other, second
+
+
+def _statuses(owner: str) -> list[tuple[object, ...]]:
+    return _rows(owner, "SELECT version, status::text FROM measure ORDER BY version")
+
+
+def _skipped(owner: str) -> list[object]:
+    return [r[0] for r in _rows(owner, "SELECT name FROM repo WHERE skipped_at IS NOT NULL")]
+
+
+def test_a_skipped_repo_does_not_hold_a_new_version_back_and_keeps_its_history(
+    db: tuple[str, str], tmp_path: Path
+) -> None:
+    owner, writer = db
+    first, _other, _second = _two_repos(writer, tmp_path)
+
+    assert skip_repo(writer, "other") is True
+    collect(writer, FIXTURE, first.path, Trigger.BACKFILL, BUILD, measures=[FilesV2()])
+
+    assert _statuses(owner) == [(1, "complete"), (2, "complete")]
+    # The active repo switched to v2; the skipped one stays visible, frozen at
+    # the version it had finished.
+    assert _view(owner) == [
+        ("fixture", 2, 10.0),
+        ("fixture", 2, 30.0),
+        ("fixture", 2, 20.0),
+        ("other", 1, 1.0),
+        ("other", 1, 3.0),
+        ("other", 1, 2.0),
+    ]
+
+
+def test_skipping_the_last_repo_a_version_waited_for_completes_it(
+    db: tuple[str, str], tmp_path: Path
+) -> None:
+    # A deployment backfills its repos in parallel: the skip may come last.
+    owner, writer = db
+    first, _other, _second = _two_repos(writer, tmp_path)
+    collect(writer, FIXTURE, first.path, Trigger.BACKFILL, BUILD, measures=[FilesV2()])
+    assert _statuses(owner) == [(1, "complete"), (2, "backfilling")]
+
+    skip_repo(writer, "other")
+
+    assert _statuses(owner) == [(1, "complete"), (2, "complete")]
+
+
+def test_the_first_skip_is_the_one_recorded(db: tuple[str, str], tmp_path: Path) -> None:
+    owner, writer = db
+    _two_repos(writer, tmp_path)
+    assert skip_repo(writer, "other") is True
+    marked = _rows(owner, "SELECT skipped_at FROM repo WHERE name = 'other'")
+    assert skip_repo(writer, "other") is False  # every later deployment
+    assert _rows(owner, "SELECT skipped_at FROM repo WHERE name = 'other'") == marked
+    assert skip_repo(writer, "unregistered") is False
+
+
+def test_a_version_no_active_repo_backfilled_does_not_complete(
+    db: tuple[str, str], tmp_path: Path
+) -> None:
+    owner, writer = db
+    first, _other, _second = _two_repos(writer, tmp_path)
+    # v2 is registered, but its only run dies part way: no repo backfilled it.
+    collect(
+        writer,
+        FIXTURE,
+        first.path,
+        Trigger.BACKFILL,
+        BUILD,
+        measures=[FilesV2FailsAt(first.shas[1])],
+    )
+    skip_repo(writer, "fixture")
+    skip_repo(writer, "other")
+    assert _statuses(owner) == [(1, "complete"), (2, "backfilling")]
+    assert {(v[0], v[1]) for v in _view(owner)} == {("fixture", 1), ("other", 1)}
+
+
+def test_a_repo_that_comes_back_is_backfilled_for_every_version_before_it_counts_again(
+    db: tuple[str, str], tmp_path: Path
+) -> None:
+    owner, writer = db
+    first, other, second = _two_repos(writer, tmp_path)
+    skip_repo(writer, "other")
+    collect(writer, FIXTURE, first.path, Trigger.BACKFILL, BUILD, measures=[FilesV2()])
+
+    # Its first run back dies part way: still skipped, still frozen at v1, and
+    # a later version (v3 here) does not wait for it.
+    died = collect(
+        writer, other, second.path, Trigger.PUSH, BUILD, measures=[FilesV2FailsAt(second.shas[1])]
+    )
+    assert died.outcome is Outcome.FAILURE
+    assert _skipped(owner) == ["other"]
+    assert {v[1] for v in _view(owner) if v[0] == "other"} == {1}
+
+    # The run that finishes makes it active again, with every version it
+    # missed recorded at every commit, and its charts switch whole.
+    back = collect(writer, other, second.path, Trigger.PUSH, BUILD, measures=[FilesV2()])
+    assert (back.outcome, back.commits_measured) == (Outcome.SUCCESS, 1)
+    assert _skipped(owner) == []
+    assert [v for v in _view(owner) if v[0] == "other"] == [
+        ("other", 2, 10.0),
+        ("other", 2, 30.0),
+        ("other", 2, 20.0),
+    ]
+    assert _rows(
+        owner,
+        "SELECT count(*) FROM measure_backfill b JOIN repo r ON r.id = b.repo_id"
+        " WHERE r.name = 'other'",
+    ) == [(2,)]
+
+    # Active again, it holds the next version back like any other repo.
+    class FilesV3(FilesV2):
+        version = 3
+        definition = "Regular files, counted a third time."
+
+    collect(writer, FIXTURE, first.path, Trigger.BACKFILL, BUILD, measures=[FilesV3()])
+    assert _statuses(owner)[-1] == (3, "backfilling")
+    collect(writer, other, second.path, Trigger.BACKFILL, BUILD, measures=[FilesV3()])
+    assert _statuses(owner)[-1] == (3, "complete")
+
+
+def test_a_clean_run_of_an_older_build_does_not_reactivate_a_skipped_repo(
+    db: tuple[str, str], tmp_path: Path
+) -> None:
+    # v2 completed without `other`; then a collector that knows only v1 runs
+    # for it (a plugin of the previous :stable, a manual run of an old image).
+    owner, writer = db
+    first, other, second = _two_repos(writer, tmp_path)
+    skip_repo(writer, "other")
+    collect(writer, FIXTURE, first.path, Trigger.BACKFILL, BUILD, measures=[FilesV2()])
+
+    old = collect(writer, other, second.path, Trigger.PUSH, BUILD, measures=ONLY_FILES)
+
+    # Nothing to do and nothing failed, but it lacks the version the views
+    # show: still skipped, still frozen at v1 rather than blank at v2.
+    assert (old.outcome, old.backlog) == (Outcome.SUCCESS, 0)
+    assert _skipped(owner) == ["other"]
+    assert [v for v in _view(owner) if v[0] == "other"] == [
+        ("other", 1, 1.0),
+        ("other", 1, 3.0),
+        ("other", 1, 2.0),
+    ]
+
+    # The current build's run is what brings it back.
+    collect(writer, other, second.path, Trigger.PUSH, BUILD, measures=[FilesV2()])
+    assert _skipped(owner) == []
+    assert {v[1] for v in _view(owner) if v[0] == "other"} == {2}
+
+
+def test_the_hotspot_view_keeps_a_skipped_repos_functions(
+    db: tuple[str, str], tmp_path: Path
+) -> None:
+    owner, writer = db
+    fixture = make_repo(tmp_path)
+    fixture.commit(
+        "Add code", {"pyproject.toml": pyproject("0.1.0"), "a.py": "def f():\n    pass\n"}
+    )
+    measures: list[Measure] = [FunctionHotspots()]
+    collect(writer, FIXTURE, fixture.path, Trigger.BACKFILL, BUILD, measures=measures)
+    before = _rows(owner, "SELECT repo, function FROM current_function_complexity")
+    assert before
+    skip_repo(writer, "fixture")
+    assert _rows(owner, "SELECT repo, function FROM current_function_complexity") == before
 
 
 class Snapshot(Files):

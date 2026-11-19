@@ -705,6 +705,34 @@ def test_a_repo_that_comes_back_is_backfilled_for_every_version_before_it_counts
     assert _statuses(owner)[-1] == (3, "complete")
 
 
+def test_a_clean_run_of_an_older_build_does_not_reactivate_a_skipped_repo(
+    db: tuple[str, str], tmp_path: Path
+) -> None:
+    # v2 completed without `other`; then a collector that knows only v1 runs
+    # for it (a plugin of the previous :stable, a manual run of an old image).
+    owner, writer = db
+    first, other, second = _two_repos(writer, tmp_path)
+    skip_repo(writer, "other")
+    collect(writer, FIXTURE, first.path, Trigger.BACKFILL, BUILD, measures=[FilesV2()])
+
+    old = collect(writer, other, second.path, Trigger.PUSH, BUILD, measures=ONLY_FILES)
+
+    # Nothing to do and nothing failed, but it lacks the version the views
+    # show: still skipped, still frozen at v1 rather than blank at v2.
+    assert (old.outcome, old.backlog) == (Outcome.SUCCESS, 0)
+    assert _skipped(owner) == ["other"]
+    assert [v for v in _view(owner) if v[0] == "other"] == [
+        ("other", 1, 1.0),
+        ("other", 1, 3.0),
+        ("other", 1, 2.0),
+    ]
+
+    # The current build's run is what brings it back.
+    collect(writer, other, second.path, Trigger.PUSH, BUILD, measures=[FilesV2()])
+    assert _skipped(owner) == []
+    assert {v[1] for v in _view(owner) if v[0] == "other"} == {2}
+
+
 def test_the_hotspot_view_keeps_a_skipped_repos_functions(
     db: tuple[str, str], tmp_path: Path
 ) -> None:

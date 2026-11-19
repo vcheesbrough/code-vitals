@@ -24,9 +24,11 @@ release on.
 A repo a deployment cannot re-measure (no plugin step, no URL) is *skipped*
 (`repo.skipped_at`, set by skip_repo): it stops counting toward completion, so
 it cannot hold a new version at `backfilling` forever, and the views keep
-showing its history at the versions it had finished. The run that next catches
-it up on every registered version makes it active again — only then, so it
-counts again exactly when it has every version it missed.
+showing its history at the versions it had finished. A run with no failed
+commit makes it active again once it has backfilled every version the views
+show — only then, so it counts again exactly when it has every version it
+missed (a clean run of an older build, which lacks a newer current version,
+leaves it skipped).
 
 A run row exists from the moment the repo is known, so every failure after
 that — a bad clone, a changed measure definition — is recorded too.
@@ -538,9 +540,13 @@ def _complete_backfill(
     which is harmless — there is no older version for the views to switch
     away from.
 
-    A skipped repo is caught up on every registered version here, so this is
-    where it becomes active again — after its backfill rows, before the
-    UPDATE, so it counts in the same statement."""
+    This is also where a skipped repo becomes active again — after its
+    backfill rows, before the UPDATE, so it counts in the same statement —
+    but only once it has backfilled every version the views show
+    (current_measure). This build may be older than the database: a clean run
+    that knows only v1 must not reactivate a repo while the views read v2,
+    where it has no rows. Versions still backfilling are not required, so a
+    returning repo holds those back like any active one."""
     with obs.db_span("INSERT", "record backfill"), conn.cursor() as cur:
         cur.executemany(
             "INSERT INTO measure_backfill (repo_id, measure_id, head_sha, run_id)"
@@ -549,12 +555,19 @@ def _complete_backfill(
         )
     with obs.db_span("UPDATE", "reactivate repo"):
         returned = conn.execute(
-            "UPDATE repo SET skipped_at = NULL WHERE id = %s AND skipped_at IS NOT NULL"
-            " RETURNING name",
+            "UPDATE repo r SET skipped_at = NULL WHERE r.id = %s AND r.skipped_at IS NOT NULL"
+            # The newest complete version of each measure, as the current_measure
+            # view has it (the writer reads the tables, not the views).
+            " AND NOT EXISTS (SELECT 1 FROM measure m WHERE m.status = 'complete'"
+            "  AND NOT EXISTS (SELECT 1 FROM measure newer WHERE newer.name = m.name"
+            "   AND newer.status = 'complete' AND newer.version > m.version)"
+            "  AND NOT EXISTS (SELECT 1 FROM measure_backfill b"
+            "   WHERE b.repo_id = r.id AND b.measure_id = m.id))"
+            " RETURNING r.name",
             (repo_id,),
         ).fetchone()
     if returned is not None:
-        log.info("%s is caught up on every version again; no longer skipped", returned[0])
+        log.info("%s is caught up on every current version again; no longer skipped", returned[0])
     _complete_measures(conn, list(measure_ids))
     with obs.db_span("UPDATE", "complete ruleset"):
         conn.execute(

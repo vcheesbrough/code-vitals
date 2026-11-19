@@ -175,10 +175,13 @@ a measure bump completes and deploys while it is away. Its history stays in
 the views, frozen at the newest complete version of each measure it had
 caught up on (so its charts can be one version behind the other repos';
 `measure_version` says which), and `freshness.skipped_at` says since when.
-Nothing un-skips it by hand: its next run with no failed commit — its own
-plugin step's, or a deployment's once the step is back — measures every
-registered version at every trunk commit and only then makes it active
-again, at which point its charts switch to the current versions whole. When
+Nothing un-skips it by hand: a run with no failed commit — its own plugin
+step's, or a deployment's once the step is back — measures every registered
+version at every trunk commit, and makes it active again once it has caught
+up on every version the views show, at which point its charts switch to the
+current versions whole. A clean run of an older collector, which lacks a
+newer current version, leaves it skipped; so does a current version no build
+registers any more, until it is retired (`code-vitals retire`). When
 every registered repo is skipped, `check-status` does not check the versions
 (nothing could backfill them).
 

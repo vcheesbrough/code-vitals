@@ -106,6 +106,13 @@ operations and e2e-suite rules of the `functionality` measures are still per
 repo name in `src/code_vitals/measures/functionality.py`, so a new repo has
 none until one is added there (a measure version bump).
 
+code-vitals measures itself the same way (card #562): its own
+`.woodpecker/code-vitals.yml` runs beside the build on every `main` push,
+never gating it, with areas `collector` (`src/`, but the pinned values in
+`expected_values.toml`, which are `tests`), `dashboard` (`superset/`),
+`tests` and `tooling`, and no operations or e2e-suite rules. Two of its
+commits are pinned in `expected_values.toml` like the other repos'.
+
 ## Versioning
 
 Ported from bored (its `.woodpecker/build.yml`, card #461):

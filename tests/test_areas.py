@@ -59,6 +59,22 @@ def test_test_code_is_tests_in_every_repo(path: str) -> None:
         ("sovereign-config", "crates/sovereign-config-web/src/lib.rs", "web"),
         ("sovereign-config", "crates/sovereign-config-core/src/lib.rs", "libraries"),
         ("sovereign-config", "proto/sovereign/config/v5/service.proto", "libraries"),
+        ("code-vitals", "src/code_vitals/collect.py", "collector"),
+        ("code-vitals", "src/code_vitals/db/migrations/0001_star_schema.sql", "collector"),
+        ("code-vitals", "superset/superset_config.py", "dashboard"),
+        ("code-vitals", "superset/dashboard/charts/a.yaml", "dashboard"),
+        ("code-vitals", "tests/test_collect.py", "tests"),
+        # Tests that sit beside what they test, by the repo's own rules.
+        ("code-vitals", "scripts/test-run-collector.sh", "tests"),
+        ("code-vitals", "superset/dashboard_import_test.py", "tests"),
+        # The deploy check's pinned values: check data, not collector code.
+        ("code-vitals", "src/code_vitals/expected_values.toml", "tests"),
+        ("code-vitals", "scripts/run-collector.sh", "tooling"),
+        ("code-vitals", ".woodpecker/build.yml", "tooling"),
+        ("code-vitals", "deploy/compose.yaml", "tooling"),
+        ("code-vitals", "authentik/blueprint.yaml", "tooling"),
+        ("code-vitals", "plugin/Dockerfile", "tooling"),
+        ("code-vitals", "pyproject.toml", "tooling"),
     ],
 )
 def test_each_repos_areas(repo: str, path: str, area: str) -> None:

@@ -235,8 +235,9 @@ core, not saved for the `1.0.0` card, which is only the sign-off.
   serialized by an advisory lock.
 
 - **Moving plugin tag in other repos.** A measured repo's code-vitals
-  step runs `registry.desync.link/code-vitals-plugin:stable` with `failure:
-  ignore`, not a pinned digest. Approved because the step can never block a
+  step runs `registry.desync.link/code-vitals-plugin:stable` with `pull: true`
+  (card #573: an agent would otherwise keep its cached image after the tag
+  moves) and `failure: ignore`, not a pinned digest. Approved because the step can never block a
   build, writes are idempotent, and catch-up refills any missed run — while
   pinning would need a cross-repo PR per measured repo for every new measure.
   The plugin starts the collector of its own version (by version tag, which

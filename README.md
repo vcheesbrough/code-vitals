@@ -62,6 +62,7 @@ steps:
   code-vitals:
     # Moving tag: code-vitals AGENTS.md § Deviations register.
     image: registry.desync.link/code-vitals-plugin:stable
+    pull: true  # the tag moves: without it an agent keeps its cached image
     failure: ignore
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -89,7 +90,10 @@ steps:
   `expected_values.toml`, if any, are skipped until repinned.
 
 The step must be in `.woodpecker/code-vitals.yml` (deployments read its
-settings there; the plugin refuses to run from any other workflow). The plugin
+settings there; the plugin refuses to run from any other workflow). Keep
+`pull: true`: Woodpecker otherwise pulls a step image only when the agent
+lacks it, so the step would go on running the plugin — and the collector of
+that plugin's version — from before the last prod deploy moved `:stable`. The plugin
 validates the settings (`src/code_vitals/settings.py`; an unknown or invalid
 setting fails the step with a message naming it), then starts the
 collector on code-vitals' prod network through the socket. The first run

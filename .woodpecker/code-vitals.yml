@@ -1,0 +1,42 @@
+# code-vitals measures itself (card #562): this repo's trunk commits are
+# recorded like any other repo's, with the plugin step of README § Measuring a
+# repo. It runs beside build.yml on every `main` push and never gates it:
+# neither workflow depends on the other, and the step cannot fail the pipeline
+# (tests/test_pipelines.py pins both, and that the settings pass the shared
+# validator). Deployments read the settings below from this file at the trunk
+# head and re-measure the repo (scripts/run-collector.sh).
+when:
+  - event: [push, manual]
+    branch: main
+skip_clone: true  # the collector clones the repo itself, with full history
+steps:
+  code-vitals:
+    # Moving tag: AGENTS.md § Deviations register. The one image in this repo
+    # not pinned by digest — it is the build the last prod deployment checked,
+    # so `pull: true` fetches whatever :stable now names.
+    image: registry.desync.link/code-vitals-plugin:stable
+    pull: true
+    failure: ignore
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    settings:
+      trunk: main
+      version_sources:
+        - {path: pyproject.toml, kind: pyproject}
+      areas:
+        version: 1  # bump whenever the rules change
+        rules:
+          # tests/** is already `tests` by the shared test rules; the shell
+          # tests of the scripts and the Superset import test sit beside
+          # what they test, so they need rules.
+          - {glob: "scripts/test-*.sh", area: tests}
+          - {glob: "superset/*_test.py", area: tests}
+          - {glob: "src/**", area: collector}
+          - {glob: "superset/**", area: dashboard}
+          # Everything else — .woodpecker/, scripts/, deploy/, authentik/,
+          # plugin/, the Dockerfile, the docs — is `tooling` by the catch-all.
+      # No operations or e2e-suite rules (src/code_vitals/measures/functionality.py
+      # has none for this repo): it serves no routes or tools and has no
+      # end-to-end suite in those measures' sense, so both record no values.
+      writer_password:
+        from_secret: code_vitals_prod_writer_password

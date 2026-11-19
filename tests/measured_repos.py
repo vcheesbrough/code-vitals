@@ -6,6 +6,10 @@ sovereign-config #568). They are kept here, exactly as those steps must write
 them, because the tests of the area rules and of expected_values.toml are
 written against them: the same rules at the same ruleset version, so moving
 them into the repos re-measures nothing.
+
+code-vitals measures itself too (card #562). Its settings are the copy below
+of its own `.woodpecker/code-vitals.yml`; tests/test_pipelines.py holds the two
+equal.
 """
 
 import yaml
@@ -14,6 +18,18 @@ from code_vitals import settings
 from code_vitals.settings import Settings
 
 SETTINGS_YAML = {
+    "code-vitals": """
+trunk: main
+version_sources:
+  - {path: pyproject.toml, kind: pyproject}
+areas:
+  version: 1
+  rules:
+    - {glob: "scripts/test-*.sh", area: tests}
+    - {glob: "superset/*_test.py", area: tests}
+    - {glob: "src/**", area: collector}
+    - {glob: "superset/**", area: dashboard}
+""",
     # version.txt is older than [workspace.package] in v-note and has gone
     # stale (0.54 against Cargo's 0.69 on 2026-10-21), so Cargo comes first.
     "v-note": """

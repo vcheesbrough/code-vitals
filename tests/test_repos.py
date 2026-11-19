@@ -60,6 +60,7 @@ def test_pr_number_comes_from_the_squash_merge_suffix(subject: str, number: int 
 
 def test_the_measured_repos_and_their_trunks() -> None:
     assert {name: repo.trunk for name, repo in MEASURED.items()} == {
+        "code-vitals": "main",
         "v-note": "master",
         "bored": "main",
         "sovereign-config": "main",

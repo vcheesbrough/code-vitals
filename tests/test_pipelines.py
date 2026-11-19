@@ -6,7 +6,8 @@ deployment from another branch never starts; dev from any branch; a push never
 deploys; and every image is pinned by digest. Also that every deployment
 collects and checks every registered repo with the deployed image before it is
 tagged, that the plugin image is built, checked and published with the
-collector, and that only prod moves :stable (both images'), last.
+collector, and that only prod moves :stable (both images'), last. And that
+the workflow measuring this repo itself (card #562) can never gate a build.
 """
 
 from pathlib import Path
@@ -15,7 +16,14 @@ from typing import Any
 import pytest
 import yaml
 
+from code_vitals import settings
+from code_vitals.measures.functionality import OPERATIONS, SUITES
+
+from .measured_repos import MEASURED
+
 WOODPECKER = Path(__file__).resolve().parent.parent / ".woodpecker"
+# The workflow that measures this repo itself (card #562).
+SELF_MEASURE = "code-vitals.yml"
 
 
 def _workflow(name: str) -> dict[str, Any]:
@@ -214,4 +222,80 @@ def test_a_push_never_deploys() -> None:
 @pytest.mark.parametrize("name", sorted(p.name for p in WOODPECKER.glob("*.yml")))
 def test_every_step_image_is_pinned_by_digest(name: str) -> None:
     for step_name, step in _workflow(name)["steps"].items():
+        if (name, step_name) == (SELF_MEASURE, "code-vitals"):
+            # The one approved moving tag (AGENTS.md § Deviations register):
+            # exactly the plugin's :stable, as in every other measured repo.
+            assert step["image"] == f"{settings.PLUGIN_IMAGE}:stable"
+            continue
         assert "@sha256:" in step["image"], f"{name}: step {step_name} image is not digest-pinned"
+
+
+# --- code-vitals measures itself (card #562) ----------------------------------
+
+
+def test_the_self_measuring_workflow_is_where_deployments_read_it() -> None:
+    # The plugin refuses any other workflow, and a deployment's backfill reads
+    # the settings from this path at the trunk head.
+    assert f".woodpecker/{SELF_MEASURE}" == settings.WORKFLOW_PATH
+    assert (WOODPECKER / SELF_MEASURE).is_file()
+
+
+def test_this_repo_is_measured_on_trunk_pushes_only() -> None:
+    workflow = _workflow(SELF_MEASURE)
+    assert _when(workflow) == [{"event": ["push", "manual"], "branch": "main"}]
+    # The collector clones the repo itself, with full history.
+    assert workflow["skip_clone"] is True
+    assert list(workflow["steps"]) == ["code-vitals"]
+    # No step-level `when:` to widen the gate.
+    assert "when" not in workflow["steps"]["code-vitals"]
+
+
+def test_measuring_this_repo_never_gates_its_build() -> None:
+    measure, build = _workflow(SELF_MEASURE), _workflow("build.yml")
+    # Neither workflow waits on the other: the build publishes whether or not
+    # the measurement ran, and the measurement runs whether or not it built.
+    assert "depends_on" not in measure
+    assert "depends_on" not in build
+    step = measure["steps"]["code-vitals"]
+    assert "depends_on" not in step
+    # A failed measurement is caught up by the next run; it never fails a push.
+    assert step["failure"] == "ignore"
+    # Every `main` push builds, and nothing in the build names the measurement.
+    assert any("branch" not in clause for clause in _when(build))
+    assert "code-vitals-plugin:stable" not in yaml.safe_dump(build)
+
+
+def test_the_self_measuring_step_is_the_documented_plugin_step() -> None:
+    step = _workflow(SELF_MEASURE)["steps"]["code-vitals"]
+    assert set(step) == {"image", "pull", "failure", "volumes", "settings"}
+    # :stable moves with every prod deployment, so it is pulled every run.
+    assert step["pull"] is True
+    assert step["volumes"] == ["/var/run/docker.sock:/var/run/docker.sock"]
+    # The prod writer, from this repo's own broker layer; no other secret.
+    assert step["settings"]["writer_password"] == {
+        "from_secret": "code_vitals_prod_writer_password"
+    }
+    assert "from_secret" not in yaml.safe_dump(
+        {k: v for k, v in step["settings"].items() if k != "writer_password"}
+    )
+
+
+def test_the_self_measuring_settings_pass_the_shared_validator() -> None:
+    found = settings.from_workflow((WOODPECKER / SELF_MEASURE).read_text())
+    assert found is not None
+    assert found.trunk == "main"
+    assert [(s.path, str(s.kind)) for s in found.version_sources] == [
+        ("pyproject.toml", "pyproject")
+    ]
+    # The copy the area and expected-value tests are written against is this
+    # file's settings exactly, so neither can drift from what is recorded.
+    assert found == MEASURED["code-vitals"]
+    # As the plugin hands them to the collector.
+    assert settings.from_json(found.as_json()) == found
+
+
+def test_this_repo_has_no_operations_or_suite_rules() -> None:
+    # Decided on card #562: it serves no routes or tools and has no e2e suite
+    # in those measures' sense. Adding rules is a measure version bump.
+    assert "code-vitals" not in OPERATIONS
+    assert "code-vitals" not in SUITES

@@ -122,6 +122,14 @@ Two environments on mini, each its own compose project of `deploy/compose.yaml`:
   refusal until the owner re-points it once:
   `UPDATE repo SET url = '<new clone URL>' WHERE name = '<repo>'` (the
   writer cannot); the error message gives the exact statement.
+  **code-vitals measures itself** (card #562) with the same step in its own
+  `.woodpecker/code-vitals.yml`, on `main` pushes, beside `build.yml` and
+  never gating it. Its area rules live there (ruleset v1: `collector`,
+  `dashboard`, `tests`, `tooling`); changing them bumps `areas.version` in
+  that file and repins its two commits in `expected_values.toml` in the same
+  PR — here the measured repo and the table are one repo, so there is no
+  reason for the table to lag. `tests/measured_repos.py` carries a copy of
+  the settings that `tests/test_pipelines.py` holds equal to the file.
   Only the `functionality` measures' operations/e2e-suite rules stay keyed by
   repo name in `src/code_vitals/measures/functionality.py` (moving them would
   change those measures' definitions).
@@ -150,8 +158,10 @@ Two environments on mini, each its own compose project of `deploy/compose.yaml`:
   (with the six secrets and a `proxy-backend` network) runs a stack on a local
   docker for trying changes; never point it at mini by hand.
 - `tests/test_pipelines.py` pins the gates: prod only from `main`, dev only to
-  dev, a push never deploys, every step image pinned by digest, every repo
-  collected and checked before the tag, `:stable` moved by prod only and last. **The gates
+  dev, a push never deploys, every step image pinned by digest (but the
+  self-measuring plugin step's `:stable`), every repo collected and checked
+  before the tag, `:stable` moved by prod only and last, and the
+  self-measuring workflow never gating the build. **The gates
   guard against accidents, not against a deliberate change** — see the trust
   assumption in § Deviations register.
 
@@ -239,7 +249,8 @@ core, not saved for the `1.0.0` card, which is only the sign-off.
   is never republished), both images bake in their version and revision, the
   collector records them with every run, and only a prod deployment whose
   checks passed moves either `:stable`. **Every other image stays pinned by
-  digest.** Each such step carries a comment pointing here.
+  digest.** Each such step carries a comment pointing here — this repo's
+  own included (`.woodpecker/code-vitals.yml`, card #562).
   - The step is a plugin (card #564), replacing the shell template copied
     into each repo (card #498): the plugin validates the settings and starts
     the collector through the socket, on `code-vitals_default` and

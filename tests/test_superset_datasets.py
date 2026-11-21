@@ -138,3 +138,42 @@ def test_the_commit_snapshot_has_a_moment_per_commit_time_and_keeps_areas(db: st
         ("03:00", "tests", 20),
         ("04:00", "tests", 20),
     ]
+
+
+def _chart_query(chart: str, where: str = "") -> str:
+    """The query a commit_snapshot chart groups by its x-axis and groupby,
+    with its metric's expression from the dataset."""
+    bundle = DATASETS.parent
+    params = yaml.safe_load((bundle / "charts" / f"{chart}.yaml").read_text())["params"]
+    dataset = yaml.safe_load((DATASETS / "code-vitals" / "commit_snapshot.yaml").read_text())
+    (metric,) = params["metrics"]
+    (expression,) = [m["expression"] for m in dataset["metrics"] if m["metric_name"] == metric]
+    (group,) = params["groupby"]
+    return (
+        f"SELECT to_char({params['x_axis']} AT TIME ZONE 'UTC', 'HH24:MI'), {group}, {expression}"
+        f" FROM ({_sql('commit_snapshot')}) AS d {where} GROUP BY 1, 2 ORDER BY 1, 2"
+    )
+
+
+def test_size_by_repo_is_each_repos_lines_over_the_areas_selected(db: str) -> None:
+    # Card #604: every area of a repo summed at each moment, carried forward.
+    _seed(db)
+    assert _read(db, _chart_query("size_by_repo")) == [
+        ("01:00", "bored", 110),
+        ("02:00", "bored", 110),
+        ("02:00", "v-note", 50),
+        ("03:00", "bored", 140),
+        ("03:00", "v-note", 50),
+        ("04:00", "bored", 140),
+        ("04:00", "v-note", 40),
+        ("05:00", "bored", 130),
+        ("05:00", "v-note", 40),
+    ]
+    # The Area filter narrows the sum to the areas it selects.
+    assert _read(db, _chart_query("size_by_repo", "WHERE area IN ('server')")) == [
+        ("01:00", "bored", 100),
+        ("02:00", "bored", 100),
+        ("03:00", "bored", 120),
+        ("04:00", "bored", 120),
+        ("05:00", "bored", 130),
+    ]

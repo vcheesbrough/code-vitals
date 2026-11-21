@@ -347,7 +347,8 @@ pipeline publishes it (`superset/dashboard_import_test.py`, run by
 `scripts/check-superset-import.sh`): the connection keeps its URI and gets the
 bundle's UUID, a re-run changes nothing, the dashboard's charts are replaced
 rather than merged, a failing import changes nothing, and what the bundle
-dropped is deleted unless something made in Superset uses it. Locally, after
+dropped is deleted unless something made in Superset uses it, and the by-repo
+size and complexity charts query each repo's totals through Superset. Locally, after
 building both images:
 `./scripts/with-test-postgres.sh ./scripts/check-superset-import.sh <superset-image> <collector-image>`.
 
@@ -362,6 +363,9 @@ building both images:
 Ratios are Superset metrics (complexity per 1,000 lines, average complexity
 per function, test share of lines). Every over-time chart has a point per
 commit at its commit time (no time grain); snapshots are drawn as steps.
+Size (lines) and total complexity are each drawn twice, side by side: by area
+(stacked, over the repos selected) and by repo (a line per repo, over the
+areas selected).
 Filters: Repo, Area, Commit time (a time range on `committed_at`) and Iteration
 apply to every chart whose dataset has the column, except Area on the test
 share (a ratio across areas); Commit picks the moment of the Hotspots table

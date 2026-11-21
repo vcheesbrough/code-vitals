@@ -10,7 +10,10 @@
 #       finds nothing; its fixed-commit values, if any, match
 #       src/code_vitals/expected_values.toml). A repo without the plugin step
 #       is skipped, not failed, and `backfill-repo` marks it skipped in the
-#       database so measure versions complete without it (card #572). The
+#       database so measure versions complete without it (card #572). A repo
+#       whose clone fails fails the step (an outage looks the same as a repo
+#       that is gone); `list-repos` leaves out a repo the owner retired with
+#       `code-vitals retire-repo` (card #586), so it is never cloned. The
 #       repos collected are written to
 #       .collected-repos for `status`. Each repo's runs are serialized by its
 #       advisory lock. A private repo (card #602) is cloned with

@@ -21,7 +21,7 @@ from code_vitals import obs, plugin, settings, telemetry
 from code_vitals.backfill import Outcome, RegisteredRepo, backfill_repo, registered_repos
 from code_vitals.build_info import BuildInfo, load_build_info
 from code_vitals.checks import check_status
-from code_vitals.collect import collect, skip_repo
+from code_vitals.collect import RepoNotRegistered, collect, retire_repo, skip_repo, unretire_repo
 from code_vitals.db.migrate import migrate
 from code_vitals.repos import RepoConfig
 from code_vitals.retire import RetireRefused, retire
@@ -102,7 +102,7 @@ def build_parser(info: BuildInfo) -> argparse.ArgumentParser:
         help="list the registered repos a deployment re-measures",
         description=(
             "One `repo <name> <url> <trunk> <private|public>` line per registered repo with"
-            " a URL. A repo without one is marked skipped."
+            " a URL that is not retired. A repo without one is marked skipped."
         ),
     )
     backfill_parser = commands.add_parser(
@@ -142,6 +142,27 @@ def build_parser(info: BuildInfo) -> argparse.ArgumentParser:
     retire_parser.add_argument("measure")
     retire_parser.add_argument("version", type=int)
     retire_parser.add_argument("--delete-rows", action="store_true")
+    retire_repo_parser = commands.add_parser(
+        "retire-repo",
+        help="retire a registered repo that is gone, so deployments stop cloning it",
+        description=(
+            "For a repo that no longer exists (deleted, or moved without its URL re-pointed),"
+            " whose failed clone would otherwise fail every deployment. Deployments stop"
+            " cloning it, it stops counting toward completing a measure version, and its"
+            " history stays visible, frozen; freshness.retired_at says since when. Its next"
+            " plugin run, or `unretire-repo`, brings it back."
+        ),
+    )
+    retire_repo_parser.add_argument("repo", type=_repo_name)
+    unretire_repo_parser = commands.add_parser(
+        "unretire-repo",
+        help="undo retire-repo: deployments clone the repo again",
+        description=(
+            "Deployments clone the repo again (and fail while it is still gone); it stays"
+            " skipped until a run catches it up."
+        ),
+    )
+    unretire_repo_parser.add_argument("repo", type=_repo_name)
     commands.add_parser(
         "plugin",
         help="run as the Woodpecker plugin (the code-vitals-plugin image's entrypoint)",
@@ -214,6 +235,10 @@ def main(
             return _check_status(conninfo, args.repo)
         if args.command == "retire":
             return _retire(conninfo, args)
+        if args.command == "retire-repo":
+            return _retire_repo(conninfo, args.repo)
+        if args.command == "unretire-repo":
+            return _unretire_repo(conninfo, args.repo)
         assert repo_settings is not None
         repo = repo_settings.repo(args.repo, args.url)
         if args.fetch:
@@ -305,11 +330,14 @@ def _list_repos(conninfo: str) -> int:
     with obs.tracer.start_as_current_span("list-repos"):
         repos = registered_repos(conninfo)
         for repo in repos:
-            if repo.url is None:
+            if repo.url is None and not repo.retired:
                 # Never cloned by a deployment, so never backfilled by one.
                 skip_repo(conninfo, repo.name)
     for repo in repos:
-        if repo.url is None:
+        if repo.retired:
+            # Already skipped too (repo_retired_is_skipped).
+            print(f"code-vitals list-repos: {repo.name} is retired; deployments skip it")
+        elif repo.url is None:
             print(f"code-vitals list-repos: {repo.name} has no URL; deployments skip it")
         else:
             access = "private" if repo.private else "public"
@@ -379,4 +407,33 @@ def _retire(conninfo: str, args: argparse.Namespace) -> int:
         f"code-vitals retire: {args.measure} v{args.version} retired (was {done.previous_status});"
         f" {done.rows_deleted} row(s) deleted"
     )
+    return 0
+
+
+def _retire_repo(conninfo: str, name: str) -> int:
+    with obs.tracer.start_as_current_span("retire-repo", attributes={obs.REPO: name}):
+        try:
+            done = retire_repo(conninfo, name)
+        except (RepoNotRegistered, psycopg.Error) as error:
+            print(f"code-vitals retire-repo: {error}", file=sys.stderr)
+            return 1
+    since = done.retired_at.isoformat(timespec="seconds")
+    if done.newly:
+        print(f"code-vitals retire-repo: {name} retired; deployments no longer clone it")
+    else:
+        print(f"code-vitals retire-repo: {name} was already retired (since {since})")
+    return 0
+
+
+def _unretire_repo(conninfo: str, name: str) -> int:
+    with obs.tracer.start_as_current_span("unretire-repo", attributes={obs.REPO: name}):
+        try:
+            was = unretire_repo(conninfo, name)
+        except (RepoNotRegistered, psycopg.Error) as error:
+            print(f"code-vitals unretire-repo: {error}", file=sys.stderr)
+            return 1
+    if was:
+        print(f"code-vitals unretire-repo: {name} is no longer retired; deployments clone it again")
+    else:
+        print(f"code-vitals unretire-repo: {name} was not retired")
     return 0

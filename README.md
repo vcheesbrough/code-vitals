@@ -194,7 +194,8 @@ release on (`measure_recomputable` and `measure_released_at` in
 Every deployment runs this over every registered repo with the deployed
 image, in parallel, then checks (`scripts/run-collector.sh`):
 
-- `code-vitals list-repos` — the registered repos and their URLs.
+- `code-vitals list-repos` — the registered repos and their URLs, but the
+  retired ones.
 - `code-vitals backfill-repo --repo R --url U --trunk T` — clones the repo,
   reads its plugin settings from `.woodpecker/code-vitals.yml` at the trunk
   head (no plugin step: marked skipped, exit 3), collects with trigger `backfill`,
@@ -224,6 +225,30 @@ newer current version, leaves it skipped; so does a current version no build
 registers any more, until it is retired (`code-vitals retire`). When
 every registered repo is skipped, `check-status` does not check the versions
 (nothing could backfill them).
+
+A repo whose clone fails is never skipped: the deployment fails, because a
+forge outage or a network fault looks exactly like a repo that is gone. A repo
+that really is gone — deleted, made private without `clone_token`, or moved
+without `repo.url` being re-pointed — would therefore fail every deployment,
+so the owner **retires** it (card #586), as the writer, on the environment's
+network:
+
+```sh
+docker run --rm --network code-vitals_default \
+  -e CODE_VITALS_DATABASE_URL=postgresql://code_vitals_writer:…@code-vitals-db:5432/code_vitals \
+  registry.desync.link/code-vitals-collector:stable retire-repo <repo>
+```
+
+A retired repo (`repo.retired_at`) is skipped too, with everything above that
+means — it stops counting toward completing a version (one waiting only for it
+completes at once), and its history stays in the views, frozen — and
+`list-repos` leaves it out, so deployments no longer clone it.
+`freshness.retired_at` (*Retired since* on the Freshness tile) says since
+when. It comes back by itself: the first run that clones it from its URL again
+— its own plugin step's — clears the mark, and it is then a skipped repo,
+active again once caught up. `code-vitals unretire-repo <repo>` clears the mark
+by hand (the next deployment clones it, and fails while it is still gone). Its
+rows are never deleted.
 
 `code-vitals retire <measure> <version> [--delete-rows]` retires a version this
 build no longer registers: it leaves the views; `--delete-rows` also deletes
@@ -282,8 +307,8 @@ get their login.
 
 The `current_*` views show only measure versions and area rulesets whose
 backfill is `complete`, so a chart never mixes two definitions of a measure
-within a repo. A skipped repo (§ Collecting) stays at the versions it had
-caught up on.
+within a repo. A skipped or retired repo (§ Collecting) stays at the versions
+it had caught up on.
 
 ## Superset
 

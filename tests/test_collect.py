@@ -17,9 +17,12 @@ from code_vitals.collect import (
     AreaRulesetConflict,
     MeasureDefinitionConflict,
     RepoNameConflict,
+    RepoNotRegistered,
     collect,
     lock_key,
+    retire_repo,
     skip_repo,
+    unretire_repo,
 )
 from code_vitals.db.migrate import migrate
 from code_vitals.gitrepo import GitError
@@ -731,6 +734,114 @@ def test_a_clean_run_of_an_older_build_does_not_reactivate_a_skipped_repo(
     collect(writer, other, second.path, Trigger.PUSH, BUILD, measures=[FilesV2()])
     assert _skipped(owner) == []
     assert {v[1] for v in _view(owner) if v[0] == "other"} == {2}
+
+
+def _retired(owner: str) -> list[object]:
+    return [r[0] for r in _rows(owner, "SELECT name FROM repo WHERE retired_at IS NOT NULL")]
+
+
+def test_retiring_a_repo_completes_what_waited_for_it_and_keeps_its_history(
+    db: tuple[str, str], tmp_path: Path
+) -> None:
+    owner, writer = db
+    first, _other, _second = _two_repos(writer, tmp_path)
+    collect(writer, FIXTURE, first.path, Trigger.BACKFILL, BUILD, measures=[FilesV2()])
+    assert _statuses(owner) == [(1, "complete"), (2, "backfilling")]
+
+    retired = retire_repo(writer, "other")
+
+    assert retired.newly is True
+    assert _statuses(owner) == [(1, "complete"), (2, "complete")]
+    assert (_retired(owner), _skipped(owner)) == (["other"], ["other"])
+    # Frozen at the version it had finished, like a skipped repo.
+    assert {(v[0], v[1]) for v in _view(owner)} == {("fixture", 2), ("other", 1)}
+
+
+def test_the_first_retirement_is_kept_and_an_unknown_repo_is_refused(
+    db: tuple[str, str], tmp_path: Path
+) -> None:
+    owner, writer = db
+    _two_repos(writer, tmp_path)
+    skip_repo(writer, "other")
+    skipped = _rows(owner, "SELECT skipped_at FROM repo WHERE name = 'other'")
+
+    first = retire_repo(writer, "other")
+    again = retire_repo(writer, "other")
+
+    assert (first.newly, again.newly) == (True, False)
+    assert again.retired_at == first.retired_at
+    # An earlier skip keeps its time.
+    assert _rows(owner, "SELECT skipped_at FROM repo WHERE name = 'other'") == skipped
+    with pytest.raises(RepoNotRegistered, match="no repo named nobody is registered"):
+        retire_repo(writer, "nobody")
+    with pytest.raises(RepoNotRegistered, match="no repo named nobody is registered"):
+        unretire_repo(writer, "nobody")
+
+
+def test_unretiring_a_repo_leaves_it_skipped_until_it_is_caught_up(
+    db: tuple[str, str], tmp_path: Path
+) -> None:
+    owner, writer = db
+    _two_repos(writer, tmp_path)
+    retire_repo(writer, "other")
+
+    assert unretire_repo(writer, "other") is True
+    assert unretire_repo(writer, "other") is False
+    assert (_retired(owner), _skipped(owner)) == ([], ["other"])
+
+
+def test_a_retired_repo_comes_back_on_its_next_run_from_its_url(
+    db: tuple[str, str], tmp_path: Path
+) -> None:
+    owner, writer = db
+    first, other, second = _two_repos(writer, tmp_path)
+    retire_repo(writer, "other")
+    collect(writer, FIXTURE, first.path, Trigger.BACKFILL, BUILD, measures=[FilesV2()])
+    from_url = RepoConfig(other.name, other.trunk, other.version_sources, url=str(second.path))
+
+    # A clean run from a local clone says nothing about its URL: it stays
+    # retired, so it stays skipped too (its views read the v2 it now has).
+    local = collect(writer, from_url, second.path, Trigger.MANUAL, BUILD, measures=[FilesV2()])
+    assert local.outcome is Outcome.SUCCESS
+    assert (_retired(owner), _skipped(owner)) == (["other"], ["other"])
+
+    # A clone of its URL that fails leaves it retired: that is what a gone
+    # repo does.
+    away = second.path.rename(tmp_path / "away")
+    with pytest.raises(GitError):
+        collect(writer, from_url, None, Trigger.PUSH, BUILD, measures=[FilesV2()])
+    assert _retired(owner) == ["other"]
+    away.rename(second.path)
+
+    # Its plugin step clones it from its URL: it exists, and is active again
+    # once caught up.
+    back = collect(writer, from_url, None, Trigger.PUSH, BUILD, measures=[FilesV2()])
+    assert back.outcome is Outcome.SUCCESS
+    assert (_retired(owner), _skipped(owner)) == ([], [])
+    assert {v[1] for v in _view(owner) if v[0] == "other"} == {2}
+
+
+def test_cli_retires_and_unretires_a_repo(
+    db: tuple[str, str], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    owner, writer = db
+    _two_repos(writer, tmp_path)
+    env = {cli.DATABASE_URL_ENV: writer}
+
+    assert cli.main(["retire-repo", "other"], env) == 0
+    assert "other retired; deployments no longer clone it" in capsys.readouterr().out
+    assert cli.main(["retire-repo", "other"], env) == 0
+    assert "other was already retired (since " in capsys.readouterr().out
+    assert cli.main(["retire-repo", "nobody"], env) == 1
+    assert "no repo named nobody is registered" in capsys.readouterr().err
+    assert _retired(owner) == ["other"]
+
+    assert cli.main(["unretire-repo", "other"], env) == 0
+    assert "other is no longer retired; deployments clone it again" in capsys.readouterr().out
+    assert cli.main(["unretire-repo", "other"], env) == 0
+    assert "other was not retired" in capsys.readouterr().out
+    assert cli.main(["unretire-repo", "nobody"], env) == 1
+    assert _retired(owner) == []
 
 
 def test_the_hotspot_view_keeps_a_skipped_repos_functions(

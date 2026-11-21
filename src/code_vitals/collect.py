@@ -42,6 +42,7 @@ that — a bad clone, a changed measure definition — is recorded too.
 """
 
 import contextlib
+import dataclasses
 import logging
 import tempfile
 import time
@@ -93,6 +94,8 @@ class RunResult:
     backlog: int
     commits_measured: int
     commits_failed: int
+    # The repo was retired, and this run's clone of its URL brought it back.
+    unretired: bool = False
 
 
 def collect(
@@ -128,13 +131,14 @@ def collect(
             try:
                 with contextlib.ExitStack() as fetched:
                     clone = _open_clone(repo, clone_path, fetched, clone_token)
-                    if clone_path is None:
-                        _unretire_on_clone(conn, repo_id)
+                    unretired = clone_path is None and _unretire_on_clone(conn, repo_id)
                     if repo.private is not None:
                         _record_private(conn, repo_id, repo.private)
                     result = _collect_from(
                         conn, clone, repo, repo_id, run_id, measures, trigger, span
                     )
+                    if unretired:
+                        result = dataclasses.replace(result, unretired=True)
             except Exception:
                 log.exception("collect failed for %s", repo.name)
                 _finish_run(conn, run_id, obs.Outcome.FAILURE, 0)
@@ -170,10 +174,11 @@ def _record_private(conn: Conn, repo_id: int, private: bool) -> None:
         conn.execute("UPDATE repo SET private = %s WHERE id = %s", (private, repo_id))
 
 
-def _unretire_on_clone(conn: Conn, repo_id: int) -> None:
+def _unretire_on_clone(conn: Conn, repo_id: int) -> bool:
     """A retired repo that was just cloned from its URL is not gone: its own
     plugin step is running. Deployments clone it again from now on; it stays
-    skipped until a run catches it up (_complete_backfill)."""
+    skipped until a run catches it up (_complete_backfill). Returns whether it
+    was retired."""
     with obs.db_span("UPDATE", "unretire repo"):
         back = conn.execute(
             "UPDATE repo SET retired_at = NULL WHERE id = %s AND retired_at IS NOT NULL"
@@ -186,6 +191,7 @@ def _unretire_on_clone(conn: Conn, repo_id: int) -> None:
             back[0],
             extra={obs.REPO: back[0]},
         )
+    return back is not None
 
 
 def _collect_from(

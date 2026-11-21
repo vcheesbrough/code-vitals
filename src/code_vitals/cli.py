@@ -302,6 +302,12 @@ def _collect(
     except Exception as error:
         print(f"code-vitals collect: {repo.name} failed: {error}", file=sys.stderr)
         return 1
+    if result.unretired:
+        # A deliberate owner mark reversed: said in the step log, not only in OTLP.
+        print(
+            f"code-vitals collect: {repo.name} was retired, but cloned from its URL again;"
+            " no longer retired, so deployments re-measure it"
+        )
     print(
         f"code-vitals collect: {repo.name}: {result.commits_measured} commit(s) measured"
         f" of {result.backlog} to do (run {result.run_id})"

@@ -816,9 +816,30 @@ def test_a_retired_repo_comes_back_on_its_next_run_from_its_url(
     # Its plugin step clones it from its URL: it exists, and is active again
     # once caught up.
     back = collect(writer, from_url, None, Trigger.PUSH, BUILD, measures=[FilesV2()])
-    assert back.outcome is Outcome.SUCCESS
+    assert (back.outcome, back.unretired) == (Outcome.SUCCESS, True)
+    assert local.unretired is False
     assert (_retired(owner), _skipped(owner)) == ([], [])
     assert {v[1] for v in _view(owner) if v[0] == "other"} == {2}
+
+
+def test_cli_says_in_the_step_log_when_a_retired_repo_comes_back(
+    db: tuple[str, str], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # INFO records go to OTLP only; this one reverses the owner's mark, so the
+    # plugin step's log says it too.
+    _, writer = db
+    _first, _other, second = _two_repos(writer, tmp_path)
+    retire_repo(writer, "other")
+    env = {cli.DATABASE_URL_ENV: writer, SETTINGS_ENV: FIXTURE_SETTINGS}
+    argv = ["collect", "--repo", "other", "--url", str(second.path), "--fetch"]
+
+    assert cli.main(argv, env) == 0
+    assert (
+        "code-vitals collect: other was retired, but cloned from its URL again; no longer"
+        " retired, so deployments re-measure it" in capsys.readouterr().out
+    )
+    assert cli.main(argv, env) == 0
+    assert "was retired" not in capsys.readouterr().out
 
 
 def test_cli_retires_and_unretires_a_repo(

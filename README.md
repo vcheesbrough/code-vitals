@@ -230,8 +230,9 @@ A repo whose clone fails is never skipped: the deployment fails, because a
 forge outage or a network fault looks exactly like a repo that is gone. A repo
 that really is gone — deleted, made private without `clone_token`, or moved
 without `repo.url` being re-pointed — would therefore fail every deployment,
-so the owner **retires** it (card #586), as the writer, on the environment's
-network:
+so the owner **retires** it (card #586), as the writer, on prod's network
+(dev is recreated from prod on every deploy, so a dev retirement does not
+survive; retiring in prod covers both):
 
 ```sh
 docker run --rm --network code-vitals_default \

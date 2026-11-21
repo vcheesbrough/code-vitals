@@ -163,6 +163,12 @@ Two environments on mini, each its own compose project of `deploy/compose.yaml`:
   the reader role and the dashboard (`scripts/smoke-superset.sh`) before
   tagging. **The dashboard is code**: each deploy overwrites it from the
   bundle, so change it in `superset/dashboard/`, never only in Superset.
+  A change to a chart or dataset there re-renders
+  `src/code_vitals/chart_rows.toml` in the same PR (README § Superset;
+  `tests/test_row_limits.py` fails otherwise): it is the collector's copy of
+  the charts' row limits, which every `collect` checks once its run is
+  recorded, failing the plugin step that takes a chart past 80% of its limit
+  (card #553) — the deploy smoke's check alone would wait for a deploy.
 - `DEPLOY_PULL=missing ./scripts/deploy-stack.sh <env> <collector> <superset>`
   (with the six secrets and a `proxy-backend` network) runs a stack on a local
   docker for trying changes; never point it at mini by hand.

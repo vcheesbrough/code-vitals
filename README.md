@@ -109,6 +109,14 @@ operations and e2e-suite rules of the `functionality` measures are still per
 repo name in `src/code_vitals/measures/functionality.py`, so a new repo has
 none until one is added there (a measure version bump).
 
+Once the run is recorded, the step also counts the rows each dashboard chart
+with an x-axis now queries (§ Superset) and **fails, naming the chart, when one
+is past 80% of its row limit** — on the very push whose data takes it there,
+with no code-vitals deploy in between (card #553). The data is recorded all
+the same, and `failure: ignore` keeps the repo's pipeline green: the failed
+step is the report, until a code-vitals change to `superset/dashboard/` makes
+room.
+
 ### Measuring a private repo
 
 A private repo adds one setting to the same step (card #602):
@@ -181,7 +189,9 @@ measured, for every registered measure version (`src/code_vitals/measures/`),
 into the database as the writer role. Safe to rerun, to run concurrently (a
 per-repo advisory lock), and to interrupt (each commit is one transaction; the
 next run finishes the rest). The measured repos are the rows of the `repo`
-table; each registers itself on its plugin step's first run.
+table; each registers itself on its plugin step's first run. Then it counts
+the dashboard charts' rows (§ Superset) and exits 1 when one is past 80% of
+its row limit, or the rows cannot be counted — the run stays recorded.
 
 A run with no failed commit records that the repo is caught up on every
 version it ran (`measure_backfill`). A version turns `complete` once every
@@ -303,7 +313,7 @@ get their login.
 | Role | May |
 | --- | --- |
 | `code_vitals` (owner) | everything; used only by `migrate` and `retire --delete-rows` |
-| `code_vitals_writer` (the collector) | read, insert and update the tables; never alter, drop, delete or create |
+| `code_vitals_writer` (the collector) | read, insert and update the tables, and read the reader's views (to count the charts' rows, card #553); never alter, drop, delete or create |
 | `code_vitals_reader` (Superset) | `SELECT` on `current_measurement`, `current_function_complexity` and `freshness` only |
 
 The `current_*` views show only measure versions and area rulesets whose
@@ -337,11 +347,18 @@ checks that, the references, the filters and the colours, and
 `tests/test_superset_datasets.py` runs the datasets' SQL as the reader.
 A chart with an x-axis queries a row per x-value and group, counted over
 every measure's groups, and Superset cuts a result off at its row limit
-without an error: each deploy's smoke (`code_vitals_dashboard --check`)
-counts those rows for every such chart and fails once one passes 80% of its
-limit (card #552), reporting the closest chart. It runs only when code-vitals
-deploys, while the rows grow with every measured repo's commits, so the 20%
-headroom must cover the growth between two deploys.
+without an error. The rows are counted, and a chart past 80% of its limit
+fails the check, naming it, in two places: each deploy's smoke
+(`code_vitals_dashboard --check`, card #552, in Superset, reporting the
+closest chart), and every `collect` — every measured repo's plugin step —
+once its run is recorded (card #553, § Measuring a repo), since the rows grow
+with every measured repo's commits and those never deploy code-vitals. The
+collector reads no Superset: `src/code_vitals/chart_rows.toml` is its copy of
+each such chart's count and limit (Superset's defaults, which
+`superset_config.py` sets from `code_vitals_dashboard`), rendered from the
+bundle and never edited by hand. A change to a chart or dataset re-renders
+it in the same PR, or `tests/test_row_limits.py` fails:
+`uv run python superset/code_vitals_dashboard.py --row-limits superset/dashboard > src/code_vitals/chart_rows.toml`.
 The import itself is tested against the real Superset in the image before the push
 pipeline publishes it (`superset/dashboard_import_test.py`, run by
 `scripts/check-superset-import.sh`): the connection keeps its URI and gets the

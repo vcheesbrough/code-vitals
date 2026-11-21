@@ -48,6 +48,8 @@ PIPELINE_NUMBER = "code_vitals.ci.pipeline.number"
 BACKLOG_COMMITS = "code_vitals.backlog.commits"
 COMMITS_MEASURED_ATTRIBUTE = "code_vitals.commits.measured"
 GIT_COMMAND = "code_vitals.git.command"
+DATASET = "code_vitals.dataset"
+CHARTS_NEAR_LIMIT = "code_vitals.charts.near_limit"
 
 RUNS = meter.create_counter(
     "code_vitals_collector.runs", unit="{run}", description="Collector runs, by outcome."

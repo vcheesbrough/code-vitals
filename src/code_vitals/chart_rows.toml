@@ -1,0 +1,184 @@
+# The dashboard charts' row limits, which the collector checks after each
+# collect (card #553). Rendered from superset/dashboard/: do not edit, run
+#   uv run python superset/code_vitals_dashboard.py --row-limits superset/dashboard > src/code_vitals/chart_rows.toml
+# tests/test_row_limits.py fails when this differs from the bundle.
+
+headroom = 0.8
+source = "d"
+
+[datasets.commit_snapshot]
+sql = '''
+-- Snapshot measures at every trunk commit (card #549). The moments are the
+-- distinct commit times across all repos. At each moment every repo is at its
+-- last measured commit at or before it, so its values carry forward until its
+-- next commit and totals across repos never dip when another repo commits.
+-- committed_at is the moment, sha and sha_committed_at the commit whose
+-- state the row is. Linear in moments x repos: each repo's latest commit is
+-- carried by a running count of its commits, not a join on every earlier one.
+-- `state` is materialized so the final join is planned on its real size
+-- (inlined, the planner misjudges it and the query takes ~7x longer).
+WITH snapshot AS (
+    SELECT repo, sha, committed_at, iteration, measure, unit, area, facet, value
+    FROM current_measurement
+    WHERE kind = 'snapshot'
+),
+commits AS (
+    SELECT DISTINCT ON (repo, committed_at) repo, committed_at, sha
+    FROM snapshot
+    ORDER BY repo, committed_at, sha DESC
+),
+grid AS (
+    SELECT m.committed_at, r.repo, c.sha,
+           count(c.sha) OVER (PARTITION BY r.repo ORDER BY m.committed_at) AS run
+    FROM (SELECT DISTINCT committed_at FROM commits) m
+    CROSS JOIN (SELECT DISTINCT repo FROM commits) r
+    LEFT JOIN commits c ON c.repo = r.repo AND c.committed_at = m.committed_at
+),
+state AS MATERIALIZED (
+    SELECT committed_at, repo,
+           first_value(sha) OVER (PARTITION BY repo, run ORDER BY committed_at) AS sha
+    FROM grid
+    WHERE run > 0
+)
+SELECT e.committed_at, s.repo, s.sha, s.committed_at AS sha_committed_at, s.iteration, s.measure,
+       s.unit, s.area, s.facet, s.value
+FROM state e
+JOIN snapshot s ON s.repo = e.repo AND s.sha = e.sha
+'''
+
+[datasets.current_measurement]
+sql = '''
+SELECT * FROM current_measurement
+'''
+
+[datasets.iteration_snapshot]
+sql = '''
+-- Snapshot measures at the end of every iteration: per repo and iteration
+-- (the minor of the repo's version), every value at the iteration's last
+-- measured commit. Iterations are per repo, so compare them within a repo.
+WITH snapshot AS (
+    SELECT * FROM current_measurement WHERE kind = 'snapshot'
+),
+iteration_end AS (
+    SELECT DISTINCT ON (repo, iteration) repo, iteration, sha
+    FROM snapshot
+    WHERE iteration IS NOT NULL
+    ORDER BY repo, iteration, committed_at DESC, sha DESC
+)
+SELECT s.week, s.repo, s.sha, s.committed_at, s.iteration, s.measure, s.unit, s.area, s.facet,
+       s.value
+FROM iteration_end e
+JOIN snapshot s ON s.repo = e.repo AND s.sha = e.sha
+'''
+
+[[charts]]
+file = "average_complexity_by_repo.yaml"
+name = "Average complexity per function"
+dataset = "commit_snapshot"
+limit = 50000
+count = "SELECT count(*) AS n FROM (SELECT 1 FROM d GROUP BY \"committed_at\", \"repo\") AS g"
+
+[[charts]]
+file = "churn.yaml"
+name = "Churn"
+dataset = "current_measurement"
+limit = 10000
+count = "SELECT count(*) AS n FROM (SELECT 1 FROM d GROUP BY \"committed_at\") AS g"
+
+[[charts]]
+file = "churn_by_area.yaml"
+name = "Churn by area"
+dataset = "current_measurement"
+limit = 50000
+count = "SELECT count(*) AS n FROM (SELECT 1 FROM d GROUP BY \"committed_at\", \"area\") AS g"
+
+[[charts]]
+file = "churn_by_iteration.yaml"
+name = "Churn per iteration"
+dataset = "current_measurement"
+limit = 10000
+count = "SELECT count(*) AS n FROM (SELECT 1 FROM d WHERE \"iteration\" IS NOT NULL GROUP BY \"iteration\", \"repo\") AS g"
+
+[[charts]]
+file = "complexity_by_area.yaml"
+name = "Complexity by area"
+dataset = "commit_snapshot"
+limit = 50000
+count = "SELECT count(*) AS n FROM (SELECT 1 FROM d GROUP BY \"committed_at\", \"area\") AS g"
+
+[[charts]]
+file = "complexity_by_repo.yaml"
+name = "Complexity by repo"
+dataset = "commit_snapshot"
+limit = 50000
+count = "SELECT count(*) AS n FROM (SELECT 1 FROM d GROUP BY \"committed_at\", \"repo\") AS g"
+
+[[charts]]
+file = "complexity_per_1000_by_repo.yaml"
+name = "Complexity per 1,000 lines"
+dataset = "commit_snapshot"
+limit = 50000
+count = "SELECT count(*) AS n FROM (SELECT 1 FROM d GROUP BY \"committed_at\", \"repo\") AS g"
+
+[[charts]]
+file = "e2e_scenarios_by_suite.yaml"
+name = "End-to-end scenarios"
+dataset = "commit_snapshot"
+limit = 50000
+count = "SELECT count(*) AS n FROM (SELECT 1 FROM d GROUP BY \"committed_at\", \"facet\") AS g"
+
+[[charts]]
+file = "functions_over_10_by_repo.yaml"
+name = "Functions over complexity 10"
+dataset = "commit_snapshot"
+limit = 50000
+count = "SELECT count(*) AS n FROM (SELECT 1 FROM d GROUP BY \"committed_at\", \"repo\") AS g"
+
+[[charts]]
+file = "lines_by_iteration.yaml"
+name = "Lines at the end of each iteration"
+dataset = "iteration_snapshot"
+limit = 10000
+count = "SELECT count(*) AS n FROM (SELECT 1 FROM d WHERE \"iteration\" IS NOT NULL GROUP BY \"iteration\", \"repo\") AS g"
+
+[[charts]]
+file = "operations_by_kind.yaml"
+name = "Operations"
+dataset = "commit_snapshot"
+limit = 50000
+count = "SELECT count(*) AS n FROM (SELECT 1 FROM d GROUP BY \"committed_at\", \"facet\") AS g"
+
+[[charts]]
+file = "size_by_area.yaml"
+name = "Size by area"
+dataset = "commit_snapshot"
+limit = 50000
+count = "SELECT count(*) AS n FROM (SELECT 1 FROM d GROUP BY \"committed_at\", \"area\") AS g"
+
+[[charts]]
+file = "size_by_repo.yaml"
+name = "Size by repo"
+dataset = "commit_snapshot"
+limit = 50000
+count = "SELECT count(*) AS n FROM (SELECT 1 FROM d GROUP BY \"committed_at\", \"repo\") AS g"
+
+[[charts]]
+file = "tile_complexity_per_1000.yaml"
+name = "Complexity per 1,000 lines"
+dataset = "commit_snapshot"
+limit = 50000
+count = "SELECT count(*) AS n FROM (SELECT 1 FROM d GROUP BY \"committed_at\") AS g"
+
+[[charts]]
+file = "tile_lines.yaml"
+name = "Lines (NLOC)"
+dataset = "commit_snapshot"
+limit = 50000
+count = "SELECT count(*) AS n FROM (SELECT 1 FROM d GROUP BY \"committed_at\") AS g"
+
+[[charts]]
+file = "tile_test_share.yaml"
+name = "Test share of lines"
+dataset = "commit_snapshot"
+limit = 50000
+count = "SELECT count(*) AS n FROM (SELECT 1 FROM d GROUP BY \"committed_at\") AS g"

@@ -107,7 +107,11 @@ Two environments on mini, each its own compose project of `deploy/compose.yaml`:
   (`repo.skipped_at`, card #572): a skipped repo does not hold a new measure
   version at `backfilling`, its history stays in the views frozen at the
   versions it had caught up on, and a clean run that has caught it up on every
-  version the views show makes it active again (README § Collecting). Then `check` runs
+  version the views show makes it active again (README § Collecting). A repo
+  whose clone fails is never skipped (an outage looks the same): a repo that
+  is really gone is retired by the owner (`code-vitals retire-repo`, card
+  #586; `repo.retired_at`, which implies `skipped_at`), and `list-repos` then
+  leaves it out until a run clones it from its URL again. Then `check` runs
   `check-status` over the repos collected; `tag-release` waits on it. A
   measure or ruleset bump therefore backfills in dev from the branch and in
   prod on release, and a measure bump must update

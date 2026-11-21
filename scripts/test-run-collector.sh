@@ -150,6 +150,21 @@ else
 fi
 rm -f "$WORK_DIR/exit.bored" "$WORK_DIR/exit.v-note"
 
+# --- a retired repo: list-repos leaves it out, so it is never cloned ----------
+cat > "$WORK_DIR/list" <<'EOF'
+code-vitals list-repos: gone is retired; deployments skip it
+repo bored https://github.com/vcheesbrough/bored.git main public
+EOF
+if run prod "$IMAGE" repos \
+    && out | grep -q "^code-vitals list-repos: gone is retired; deployments skip it$" \
+    && ! calls | grep -q "backfill-repo --repo gone" \
+    && [ "$(collected)" = bored ] \
+    && out | grep -q "1 repo(s): 1 collected, 0 failed"; then
+    pass "retired repo: said in the log, not cloned, not in the collected list"
+else
+    fail "retired repo: $(out) / calls: $(calls) / collected: $(collected)"
+fi
+
 # --- a private repo: its token on stdin, public repos exactly as before --------
 TOKEN=ghp_t0ken
 cat > "$WORK_DIR/list" <<'EOF'

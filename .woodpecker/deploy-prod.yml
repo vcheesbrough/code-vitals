@@ -151,7 +151,8 @@ steps:
     # ruleset is recomputed over the whole history here — in dev from the
     # branch, in prod on release — and the values at the fixed commits of
     # src/code_vitals/expected_values.toml must match. A repo without the
-    # plugin step is skipped, not failed.
+    # plugin step is skipped, not failed; a failed clone fails, and a repo
+    # the owner retired (code-vitals retire-repo) is not cloned.
     depends_on:
       - deploy
     image: *docker-image

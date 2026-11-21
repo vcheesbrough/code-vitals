@@ -1,7 +1,8 @@
 table_name: freshness
 main_dttm_col: null
 description: 'Per repo: the newest commit with a recorded value, its age, the last collector run,
-  and since when deployments skip it (no plugin step). The pipeline''s health signal.'
+  since when deployments skip it (no plugin step), and since when it is retired (gone). The
+  pipeline''s health signal.'
 default_endpoint: null
 offset: 0
 cache_timeout: null
@@ -102,6 +103,20 @@ columns:
   description: When a deployment first found the repo without a code-vitals plugin step (or
     without a URL). Empty for a repo that is being collected. A skipped repo's charts are frozen
     at the measure versions it had finished.
+  python_date_format: null
+  extra: null
+- column_name: retired_at
+  verbose_name: Retired since
+  is_dttm: false
+  is_active: true
+  type: TIMESTAMP WITH TIME ZONE
+  advanced_data_type: null
+  groupby: true
+  filterable: true
+  expression: null
+  description: When the owner retired the repo because it is gone (deleted, or moved). Deployments
+    no longer clone it, and its charts are frozen at the measure versions it had finished. Empty
+    for a repo that is not retired; its next plugin run clears it.
   python_date_format: null
   extra: null
 - column_name: last_recorded_commit

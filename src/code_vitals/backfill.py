@@ -9,7 +9,10 @@ trigger=backfill and checks it (checks.check_repo). A repo whose workflow has
 no plugin step (any more, or not yet) is skipped, not failed: it says so in
 the step log, is left out of check-status, and is marked skipped in the
 database (collect.skip_repo), so new measure versions complete without it
-until one of its runs catches it up again.
+until one of its runs catches it up again. A repo whose clone fails is a
+failure, never a skip (an outage looks the same as a repo that is gone); the
+owner retires a repo that is really gone (collect.retire_repo), and
+deployments then leave it out.
 """
 
 import contextlib
@@ -40,14 +43,20 @@ class RegisteredRepo:
     trunk: str
     # Cloned with a token (migration 0008).
     private: bool = False
+    # Retired by the owner (migration 0009): deployments do not clone it.
+    retired: bool = False
 
 
 def registered_repos(conninfo: str) -> list[RegisteredRepo]:
     with psycopg.connect(conninfo) as conn, obs.db_span("SELECT", "registered repos"):
-        rows = conn.execute("SELECT name, url, trunk, private FROM repo ORDER BY name").fetchall()
+        rows = conn.execute(
+            "SELECT name, url, trunk, private, retired_at IS NOT NULL FROM repo ORDER BY name"
+        ).fetchall()
     return [
-        RegisteredRepo(str(name), None if url is None else str(url), str(trunk), bool(private))
-        for name, url, trunk, private in rows
+        RegisteredRepo(
+            str(name), None if url is None else str(url), str(trunk), bool(private), bool(retired)
+        )
+        for name, url, trunk, private, retired in rows
     ]
 
 

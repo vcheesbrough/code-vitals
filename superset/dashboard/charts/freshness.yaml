@@ -2,7 +2,9 @@ slice_name: Freshness
 description: 'Per repo, the newest commit the collector recorded and how old it is, and the last collector
   run. The pipeline''s health check: a repo whose age keeps growing while it has new commits, or whose
   last run failed, is not being collected. "Skipped since" is set for a repo deployments skip because
-  it has no code-vitals plugin step: its charts are frozen at the measure versions it had finished.'
+  it has no code-vitals plugin step: its charts are frozen at the measure versions it had finished.
+  "Retired since" is set for a repo the owner retired because it is gone: deployments no longer clone
+  it, and its charts are frozen the same way.'
 certified_by: null
 certification_details: null
 viz_type: table
@@ -17,6 +19,7 @@ params:
   - last_run_finished_at
   - last_run_outcome
   - skipped_at
+  - retired_at
   order_by_cols:
   - '["repo", true]'
   adhoc_filters: []

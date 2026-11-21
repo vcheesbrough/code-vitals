@@ -19,6 +19,7 @@ position:
     - ROW-health
     - HEADER-size
     - ROW-size
+    - ROW-complexity-totals
     - ROW-complexity
     - HEADER-change
     - ROW-churn
@@ -151,7 +152,7 @@ position:
   ROW-size:
     children:
     - CHART-size_by_area
-    - CHART-complexity_by_area
+    - CHART-size_by_repo
     id: ROW-size
     meta:
       background: BACKGROUND_TRANSPARENT
@@ -173,6 +174,31 @@ position:
     - GRID_ID
     - ROW-size
     type: CHART
+  CHART-size_by_repo:
+    children: []
+    id: CHART-size_by_repo
+    meta:
+      chartId: 17
+      height: 50
+      sliceName: Size by repo
+      uuid: 0687f19f-c58d-5ae8-b8fe-cf2d6ec32868
+      width: 6
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-size
+    type: CHART
+  ROW-complexity-totals:
+    children:
+    - CHART-complexity_by_area
+    - CHART-complexity_by_repo
+    id: ROW-complexity-totals
+    meta:
+      background: BACKGROUND_TRANSPARENT
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    type: ROW
   CHART-complexity_by_area:
     children: []
     id: CHART-complexity_by_area
@@ -185,7 +211,21 @@ position:
     parents:
     - ROOT_ID
     - GRID_ID
-    - ROW-size
+    - ROW-complexity-totals
+    type: CHART
+  CHART-complexity_by_repo:
+    children: []
+    id: CHART-complexity_by_repo
+    meta:
+      chartId: 18
+      height: 50
+      sliceName: Complexity by repo
+      uuid: b2e7d78c-6962-53f4-acdd-5ae416f1024c
+      width: 6
+    parents:
+    - ROOT_ID
+    - GRID_ID
+    - ROW-complexity-totals
     type: CHART
   ROW-complexity:
     children:
@@ -583,6 +623,8 @@ metadata:
       - 13
       - 14
       - 15
+      - 17
+      - 18
     type: NATIVE_FILTER
     sortMetric: latest_commit_at
     requiredFirst: true

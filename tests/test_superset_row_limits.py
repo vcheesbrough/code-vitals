@@ -169,6 +169,8 @@ def test_every_chart_with_an_x_axis_is_guarded_and_countable() -> None:
         "e2e_scenarios_by_suite.yaml",
         "size_by_area.yaml",
         "complexity_by_area.yaml",
+        "size_by_repo.yaml",
+        "complexity_by_repo.yaml",
         "churn_by_area.yaml",
         "average_complexity_by_repo.yaml",
         "lines_by_iteration.yaml",
@@ -192,6 +194,8 @@ def db(fresh_db: str) -> Iterator[str]:
         ("size_by_area.yaml", 2 + 3 + 3 + 3 + 2),
         # Per repo: bored at all five moments, v-note from 02:00.
         ("average_complexity_by_repo.yaml", 5 + 4),
+        ("size_by_repo.yaml", 5 + 4),
+        ("complexity_by_repo.yaml", 5 + 4),
         # Flows at each commit time only, by area: two bored commits at 03:00.
         ("churn_by_area.yaml", 2 + 1 + 2 + 1 + 1),
         # (iteration, repo): bored 1, 2, 3 and v-note 1, 2.

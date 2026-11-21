@@ -321,6 +321,60 @@ def test_the_check_fails_on_a_chart_near_its_row_limit() -> None:
     assert f"{chart} {rows} of {rows}" in done.stderr, done.stderr
 
 
+def _chart_rows(file: str, filters: list[dict[str, Any]]) -> list[tuple[str, str, float]]:
+    """What Superset's own query for the imported charts/<file> returns, as
+    the dashboard asks it (its x-axis, groupby, metrics and filters, plus
+    `filters` from the dashboard's): (day, group, value) rows."""
+    from superset.common.query_context_factory import QueryContextFactory
+    from superset.models.slice import Slice
+
+    chart = _by_uuid(Slice, str(FILES[f"charts/{file}"]["uuid"]))
+    params = chart.form_data
+    (metric,) = params["metrics"]
+    # The slice itself: by its form data's slice_id it would be looked up
+    # through Superset's permission filter, which needs a signed-in user.
+    context = QueryContextFactory().create(
+        current_slice=chart,
+        datasource={"id": chart.datasource_id, "type": chart.datasource_type},
+        queries=[
+            {
+                "columns": [params["x_axis"], *params["groupby"]],
+                "metrics": params["metrics"],
+                "filters": [
+                    {"col": f["subject"], "op": f["operator"], "val": f["comparator"]}
+                    for f in params["adhoc_filters"]
+                ]
+                + filters,
+                "row_limit": params["row_limit"],
+            }
+        ],
+        form_data=params,
+    )
+    result = context.get_query_result(context.queries[0])
+    assert result.error_message is None, result.error_message
+    (group,) = params["groupby"]
+    return sorted(
+        (str(row[params["x_axis"]])[:10], str(row[group]), float(row[metric]))
+        for _, row in result.df.iterrows()
+    )
+
+
+def test_the_by_repo_charts_query_each_repos_total_through_superset() -> None:
+    # Card #604: the imported Size by repo and Complexity by repo charts run
+    # in Superset itself, a point per commit for each repo, narrowed by the
+    # Area filter.
+    assert _chart_rows("size_by_repo.yaml", []) == [
+        ("2026-10-01", "bored", 100.0),
+        ("2026-10-02", "bored", 200.0),
+    ]
+    assert _chart_rows("complexity_by_repo.yaml", []) == [
+        ("2026-10-01", "bored", 10.0),
+        ("2026-10-02", "bored", 20.0),
+    ]
+    elsewhere = [{"col": "area", "op": "IN", "val": ["web"]}]
+    assert _chart_rows("size_by_repo.yaml", elsewhere) == []
+
+
 def test_an_existing_connection_is_given_the_bundles_uuid_and_keeps_its_uri() -> None:
     from superset.models.core import Database
 
@@ -495,13 +549,14 @@ def _setup() -> None:
             "CREATE ROLE superset LOGIN PASSWORD %s", (os.environ["SUPERSET_DB_PASSWORD"],)
         )
         cursor.execute("CREATE DATABASE superset OWNER superset")
-        # One repo, two commits, a snapshot and a flow measure in one area,
-        # as tests/test_superset_datasets.py seeds it.
+        # One repo, two commits, two snapshot measures and a flow measure in
+        # one area, as tests/test_superset_datasets.py seeds it.
         cursor.execute("INSERT INTO repo (id, name, trunk) VALUES (1, 'bored', 'main')")
         cursor.execute(
             "INSERT INTO measure (id, name, version, unit, kind, definition, recomputable,"
             " status) VALUES (1, 'nloc', 1, 'lines', 'snapshot', 'v1', true, 'complete'),"
-            " (2, 'lines_added', 1, 'lines', 'flow', 'v1', true, 'complete')"
+            " (2, 'lines_added', 1, 'lines', 'flow', 'v1', true, 'complete'),"
+            " (3, 'complexity_total', 1, 'ccn', 'snapshot', 'v1', true, 'complete')"
         )
         cursor.execute(
             "INSERT INTO area_ruleset (id, repo_id, version, rules, status)"
@@ -516,8 +571,8 @@ def _setup() -> None:
             )
             cursor.execute(
                 "INSERT INTO measurement (commit_id, measure_id, area_id, facet, value)"
-                " VALUES (%s, 1, 1, '', %s), (%s, 2, 1, '', 7)",
-                (commit_id, 100 * commit_id, commit_id),
+                " VALUES (%s, 1, 1, '', %s), (%s, 2, 1, '', 7), (%s, 3, 1, '', %s)",
+                (commit_id, 100 * commit_id, commit_id, commit_id, 10 * commit_id),
             )
     connection.close()
     started = time.monotonic()

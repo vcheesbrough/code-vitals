@@ -1,0 +1,59 @@
+slice_name: Size by repo
+description: Lines (lizard NLOC) at every commit, per repo, over the areas selected (each repo
+  carried forward between its commits).
+certified_by: null
+certification_details: null
+viz_type: echarts_timeseries_line
+params:
+  viz_type: echarts_timeseries_line
+  time_grain_sqla: null
+  x_axis_sort_asc: true
+  x_axis_sort_series: name
+  x_axis_sort_series_ascending: true
+  x_axis_time_format: '%Y-%m-%d'
+  rich_tooltip: true
+  tooltipTimeFormat: '%Y-%m-%d %H:%M'
+  show_legend: true
+  legendType: scroll
+  legendOrientation: top
+  row_limit: 50000
+  truncate_metric: true
+  show_empty_columns: false
+  comparison_type: values
+  annotation_layers: []
+  forecastEnabled: false
+  markerEnabled: false
+  zoomable: false
+  truncateXAxis: true
+  y_axis_bounds:
+  - null
+  - null
+  y_axis_title_margin: 15
+  x_axis_title_margin: 15
+  y_axis_title_position: Left
+  color_scheme: codeVitals
+  extra_form_data: {}
+  x_axis: committed_at
+  metrics:
+  - lines
+  groupby:
+  - repo
+  adhoc_filters:
+  - clause: WHERE
+    expressionType: SIMPLE
+    subject: committed_at
+    operator: TEMPORAL_RANGE
+    comparator: No filter
+    isExtra: false
+    isNew: false
+    sqlExpression: null
+    filterOptionName: filter_committed_at_temporal_range
+  y_axis_format: SMART_NUMBER
+  seriesType: end
+query_context: null
+cache_timeout: null
+uuid: 0687f19f-c58d-5ae8-b8fe-cf2d6ec32868
+version: 1.0.0
+dataset_uuid: 608f9000-5474-5448-a9f7-d31a35f4a348
+is_managed_externally: true
+external_url: https://github.com/vcheesbrough/code-vitals/blob/main/superset/dashboard/charts/size_by_repo.yaml

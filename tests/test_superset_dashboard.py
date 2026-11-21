@@ -371,11 +371,13 @@ def test_over_time_charts_have_a_point_per_commit() -> None:
         "churn.yaml",
         "churn_by_area.yaml",
         "complexity_by_area.yaml",
+        "complexity_by_repo.yaml",
         "complexity_per_1000_by_repo.yaml",
         "e2e_scenarios_by_suite.yaml",
         "functions_over_10_by_repo.yaml",
         "operations_by_kind.yaml",
         "size_by_area.yaml",
+        "size_by_repo.yaml",
         "tile_complexity_per_1000.yaml",
         "tile_lines.yaml",
         "tile_test_share.yaml",
@@ -387,6 +389,45 @@ def test_over_time_charts_have_a_point_per_commit() -> None:
     for data in CHARTS.values():
         assert data["params"].get("x_axis") != "week", data["slice_name"]
         assert data["params"].get("time_grain_sqla") is None, data["slice_name"]
+
+
+def _row_of(key: str) -> str:
+    """The layout row holding the chart in charts/<key>.yaml."""
+    (row,) = [
+        node_id
+        for node_id, node in POSITION.items()
+        if isinstance(node, dict)
+        and node.get("type") == "ROW"
+        and f"CHART-{key}" in node["children"]
+    ]
+    return row
+
+
+@pytest.mark.parametrize(
+    ("by_repo", "by_area"),
+    [("size_by_repo", "size_by_area"), ("complexity_by_repo", "complexity_by_area")],
+)
+def test_the_by_repo_totals_are_their_by_area_charts_per_repo(by_repo: str, by_area: str) -> None:
+    # Card #604: each repo's absolute size and complexity side by side, over
+    # every area the Area filter leaves: the by-area chart's metric, dataset,
+    # x-axis and filters, one series per repo, drawn beside it.
+    repo = FILES[f"charts/{by_repo}.yaml"]
+    area = FILES[f"charts/{by_area}.yaml"]
+    assert repo["dataset_uuid"] == area["dataset_uuid"] == _dataset("commit_snapshot")["uuid"]
+    assert repo["params"]["metrics"] == area["params"]["metrics"]
+    assert repo["params"]["groupby"] == ["repo"]
+    assert area["params"]["groupby"] == ["area"]
+    for key in ["x_axis", "adhoc_filters", "y_axis_format", "row_limit", "seriesType"]:
+        assert repo["params"][key] == area["params"][key], key
+    # Repos are compared, not added up: lines, not a stack.
+    assert repo["viz_type"] == "echarts_timeseries_line"
+    assert "stack" not in repo["params"]
+    row = _row_of(by_repo)
+    assert POSITION[row]["children"] == [f"CHART-{by_area}", f"CHART-{by_repo}"]
+    # Every dashboard filter but Commit reaches it.
+    chart_id = _chart_id(by_repo)
+    for name, data in FILTERS.items():
+        assert (chart_id in data["scope"]["excluded"]) == (name == "Commit"), name
 
 
 def test_grouped_over_time_charts_drop_empty_series() -> None:

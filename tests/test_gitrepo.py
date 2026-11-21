@@ -1,3 +1,4 @@
+import os
 import subprocess
 from collections.abc import Iterator
 from pathlib import Path
@@ -5,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from code_vitals.gitrepo import TOKEN_ENV, Clone, GitError, clone_from
+from code_vitals.gitrepo import TOKEN_ENV, Clone, GitError, clone_from, credential_config
 
 from .git_http_server import GitHttpServer
 from .gitfixture import FixtureRepo, make_repo, three_commit_history
@@ -232,3 +233,43 @@ def test_a_public_clone_gets_no_token_and_no_helper(
     [(args, env)] = seen
     assert args[:2] == ["git", "clone"]
     assert TOKEN_ENV not in env
+
+
+def _filled(config: list[str], request: str, home: Path) -> str:
+    """What `git credential fill` answers for `request` under `config`, with
+    the token set and no prompt to fall back on."""
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_ASKPASS": "",
+        "SSH_ASKPASS": "",
+        TOKEN_ENV: TOKEN,
+    }
+    env.pop("GIT_CONFIG_GLOBAL", None)
+    result = subprocess.run(
+        ["git", *config, "credential", "fill"],
+        input=request,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.stdout
+
+
+@pytest.mark.parametrize(
+    "other",
+    [
+        "protocol=https\nhost=evil.example\n\n",  # a redirect to another host
+        "protocol=http\nhost=github.com\n\n",  # a downgrade to cleartext
+        "protocol=https\nhost=github.com:8443\n\n",  # another port
+    ],
+)
+def test_the_token_is_offered_to_the_clones_origin_only(isolated_home: Path, other: str) -> None:
+    config = credential_config("https://github.com/vcheesbrough/mini-config.git")
+    own = _filled(
+        config, "protocol=https\nhost=github.com\npath=vcheesbrough/x.git\n\n", isolated_home
+    )
+    assert f"password={TOKEN}" in own
+    assert TOKEN not in _filled(config, other, isolated_home)

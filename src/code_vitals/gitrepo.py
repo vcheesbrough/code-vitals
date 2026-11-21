@@ -10,6 +10,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from code_vitals import obs
 
@@ -57,19 +58,35 @@ _CREDENTIAL_HELPER = (
 )
 
 
+def credential_config(url: str) -> list[str]:
+    """The `git -c` options that offer the token to `url`'s origin only.
+
+    Every configured helper is cleared first, for every host, so none stores
+    the token, and a redirect to another origin (another host, port or
+    scheme: `http://` for an `https://` clone) is offered no credential."""
+    parts = urlsplit(url)
+    origin = f"{parts.scheme}://{parts.netloc}"
+    return [
+        "-c",
+        "credential.helper=",
+        "-c",
+        f"credential.{origin}.helper={_CREDENTIAL_HELPER}",
+    ]
+
+
 def clone_from(url: str, dest: Path, token: str | None = None) -> "Clone":
     """A full clone of `url` (every branch and tag) at `dest`, without a
     working tree: the collector reads git objects only.
 
     A private repo's `token` is offered over HTTP authentication by a
-    credential helper set for this one command (`git -c`, which the clone does
-    not record), after clearing any configured helper so none stores it. It
-    is never in the URL, an argument or the clone's `.git/config`."""
+    credential helper set for this one command and `url`'s origin only (`git
+    -c`, which the clone does not record; credential_config). It is never in
+    the URL, an argument or the clone's `.git/config`."""
     command = ["git"]
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
     env.pop(TOKEN_ENV, None)
     if token:
-        command += ["-c", "credential.helper=", "-c", f"credential.helper={_CREDENTIAL_HELPER}"]
+        command += credential_config(url)
         env[TOKEN_ENV] = token
     with obs.git_span("clone"):
         result = subprocess.run(

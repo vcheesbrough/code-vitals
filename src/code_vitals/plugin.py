@@ -9,9 +9,14 @@ and passes the collector's exit status on. The collector clones the public
 repo itself (`collect --fetch`, full history and tags) and records the repo,
 its URL and every trunk commit not yet measured.
 
-Secrets reach the collector by name (`-e NAME`), never on a command line.
-Nothing here reads stdin: Woodpecker feeds a step's commands to its shell
-that way, and a plugin step must not depend on it either.
+A private repo adds a `clone_token` setting (card #602): the collector clones
+with it and records the repo as private, so deployments clone it with a token
+too. The token reaches the collector on its stdin (`collect
+--clone-token-stdin`), not by `-e`, which `docker inspect` would show.
+
+Other secrets reach the collector by name (`-e NAME`), never on a command
+line. Nothing here reads stdin: Woodpecker feeds a step's commands to its
+shell that way, and a plugin step must not depend on it either.
 """
 
 import json
@@ -40,6 +45,7 @@ REPO_URL_ENV = "CI_REPO_CLONE_URL"
 WORKFLOW_NAME_ENV = "CI_WORKFLOW_NAME"
 PIPELINE_NUMBER_ENV = "CI_PIPELINE_NUMBER"
 PASSWORD_ENV = settings.PLUGIN_ENV_PREFIX + settings.WRITER_PASSWORD.upper()
+TOKEN_ENV = settings.PLUGIN_ENV_PREFIX + settings.CLONE_TOKEN.upper()
 
 _NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 _URL = re.compile(r"^https?://[^@\s]+$")
@@ -74,7 +80,7 @@ def collector_env(environ: Mapping[str, str]) -> tuple[str, str, dict[str, str]]
     url = environ.get(REPO_URL_ENV, "")
     if not _URL.match(url):
         raise PluginError(
-            f"{REPO_URL_ENV} must be the repo's public http(s) clone URL, not {url!r}"
+            f"{REPO_URL_ENV} must be the repo's http(s) clone URL, without credentials, not {url!r}"
         )
     password = environ.get(PASSWORD_ENV, "")
     if not password:
@@ -108,8 +114,10 @@ def run(
         return 2
     image = collector_image(build)
     found = json.loads(env[settings.SETTINGS_ENV])
+    token = environ.get(TOKEN_ENV, "")
     print(
-        f"code-vitals plugin {build.version}: {name} from {url}, trunk {found['trunk']},"
+        f"code-vitals plugin {build.version}: {name} from {url}"
+        f"{' (private: cloned with clone_token)' if token else ''}, trunk {found['trunk']},"
         f" area ruleset v{found['areas']['version']}; starting {image}",
         flush=True,
     )
@@ -121,16 +129,22 @@ def run(
     docker_env.update(env)
     names = [flag for var in env for flag in ("-e", var)]
 
-    def call(*args: str, capture: bool = False) -> subprocess.CompletedProcess[str]:
+    def call(
+        *args: str, capture: bool = False, stdin: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [docker, *args],
             env=docker_env,
-            stdin=subprocess.DEVNULL,
+            # Only the collector of a private repo is given input: its token.
+            input=stdin,
+            stdin=subprocess.DEVNULL if stdin is None else None,
             # Otherwise inherited: the collector's output is the step log.
             stdout=subprocess.PIPE if capture else None,
             text=True,
             check=False,
         )
+
+    interactive = ["--interactive"] if token else []
 
     # --rm: the daemon removes the container whenever it exits, even if this
     # step is cancelled first; the finally covers a failure before it starts.
@@ -141,6 +155,7 @@ def run(
         "missing",
         "--network",
         DB_NETWORK,
+        *interactive,
         *names,
         image,
         "collect",
@@ -149,6 +164,7 @@ def run(
         "--url",
         url,
         "--fetch",
+        *(["--clone-token-stdin"] if token else []),
         "--trigger",
         "push",
         capture=True,
@@ -162,7 +178,9 @@ def run(
         connected = call("network", "connect", TELEMETRY_NETWORK, cid)
         if connected.returncode != 0:
             return connected.returncode
-        return call("start", "--attach", cid).returncode
+        return call(
+            "start", "--attach", *interactive, cid, stdin=f"{token}\n" if token else None
+        ).returncode
     finally:
         subprocess.run(
             [docker, "rm", "-f", cid],

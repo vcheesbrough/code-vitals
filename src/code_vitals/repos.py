@@ -37,9 +37,12 @@ class RepoConfig:
     # a repo that moved its version keeps an iteration across the move.
     version_sources: tuple[VersionSource, ...]
     areas: AreaRuleset = GENERIC
-    # Where `collect --fetch` and a deployment's backfill clone it from:
-    # public, so no credentials.
+    # Where `collect --fetch` and a deployment's backfill clone it from. Never
+    # holds credentials: a private repo's clone token is passed separately.
     url: str | None = None
+    # Whether it needs a clone token (recorded on `repo`); None leaves the
+    # recorded value as it is.
+    private: bool | None = None
 
 
 _SEMVER = re.compile(r"^\s*v?(\d+)\.(\d+)\.(\d+)")

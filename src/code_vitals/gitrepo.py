@@ -10,6 +10,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from code_vitals import obs
 
@@ -45,20 +46,64 @@ class ExtractedTree:
     skipped: int  # entries not written: submodules, unsafe paths, links leaving the tree
 
 
-def clone_from(url: str, dest: Path) -> "Clone":
+# Holds a private repo's clone token for the one git process that clones it.
+TOKEN_ENV = "CODE_VITALS_GIT_TOKEN"
+# git runs this for each credential it needs (`get`), and for `store`/`erase`
+# afterwards, which it ignores. The token is read from the clone's environment
+# when git asks, so it is on no command line; GitHub accepts any user name
+# with a token as the password.
+_CREDENTIAL_HELPER = (
+    f'!f() {{ test "$1" = get || exit 0; echo username=x-access-token;'
+    f' echo "password=${TOKEN_ENV}"; }}; f'
+)
+
+
+def credential_config(url: str) -> list[str]:
+    """The `git -c` options that offer the token to `url`'s origin only.
+
+    Every configured helper is cleared first, for every host, so none stores
+    the token, and a redirect to another origin (another host, port or
+    scheme: `http://` for an `https://` clone) is offered no credential."""
+    parts = urlsplit(url)
+    origin = f"{parts.scheme}://{parts.netloc}"
+    return [
+        "-c",
+        "credential.helper=",
+        "-c",
+        f"credential.{origin}.helper={_CREDENTIAL_HELPER}",
+    ]
+
+
+def clone_from(url: str, dest: Path, token: str | None = None) -> "Clone":
     """A full clone of `url` (every branch and tag) at `dest`, without a
-    working tree: the collector reads git objects only."""
+    working tree: the collector reads git objects only.
+
+    A private repo's `token` is offered over HTTP authentication by a
+    credential helper set for this one command and `url`'s origin only (`git
+    -c`, which the clone does not record; credential_config). It is never in
+    the URL, an argument or the clone's `.git/config`."""
+    command = ["git"]
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    env.pop(TOKEN_ENV, None)
+    if token:
+        command += credential_config(url)
+        env[TOKEN_ENV] = token
     with obs.git_span("clone"):
         result = subprocess.run(
-            ["git", "clone", "--quiet", "--no-checkout", url, str(dest)],
+            [*command, "clone", "--quiet", "--no-checkout", url, str(dest)],
             capture_output=True,
             text=True,
             check=False,
-            # Fail rather than wait on a credential prompt if a repo goes private.
-            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            # Fail rather than wait on a credential prompt: a private repo
+            # without a token, or a public one that went private.
+            env=env,
         )
     if result.returncode != 0:
-        raise GitError(f"git clone of {url} failed: {result.stderr.strip()}")
+        stderr = result.stderr.strip()
+        if token:
+            # git does not print it; this keeps it that way whatever it prints.
+            stderr = stderr.replace(token, "<token>")
+        raise GitError(f"git clone of {url} failed: {stderr}")
     return Clone(dest)
 
 

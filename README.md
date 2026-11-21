@@ -48,7 +48,8 @@ the collector under the same version, and starts the collector of that version.
 
 ## Measuring a repo
 
-A public repo is measured by adding one step to it, in
+A public repo is measured by adding one step to it (a private one adds a
+token: § Measuring a private repo), in
 `.woodpecker/code-vitals.yml` — no change to code-vitals and no secrets change
 (the writer password is in the broker's shared layer):
 
@@ -107,6 +108,38 @@ visible). The
 operations and e2e-suite rules of the `functionality` measures are still per
 repo name in `src/code_vitals/measures/functionality.py`, so a new repo has
 none until one is added there (a measure version bump).
+
+### Measuring a private repo
+
+A private repo adds one setting to the same step (card #602):
+
+```yaml
+      clone_token:
+        from_secret: github_token
+```
+
+- **The token:** the broker's shared-layer `github_token`, which every repo's
+  pipelines can read (as they can the writer password), so a private repo
+  needs no broker change and no Woodpecker `netrc_trusted` change either. It
+  must be able to read the repo (`contents:read`). Deployments clone the repo
+  with the same secret: the deploy's `collect` step has it as
+  `CODE_VITALS_CLONE_TOKEN`.
+- **How it is used:** the plugin hands it to the collector on stdin
+  (`collect --clone-token-stdin`); `scripts/run-collector.sh` does the same for
+  `backfill-repo`. It is never an argument or a container variable (so not in
+  `docker inspect`), never in the URL (`repo.url` refuses `@`), and never in
+  the clone: git gets it from a credential helper set for the one `clone`
+  command, with every configured helper cleared first so none stores it. It
+  is never logged, put in a span or stored.
+- **Private or public** is recorded on `repo.private` by each plugin run that
+  cloned the repo: with `clone_token` it is private, without it public. A
+  failed clone changes nothing. Deployments clone private repos with the token
+  and public ones anonymously, exactly as before. A private repo whose
+  deployment has no token, or whose token cannot read it, fails the
+  deployment's `collect` step; it is never skipped.
+- **Visibility:** its name, area rules, paths and sizes are shown on the
+  dashboard like any other repo's, to everyone with Superset access (behind
+  Authentik, groups managed by hand). Private repos are not filtered out.
 
 code-vitals measures itself the same way (card #562): its own
 `.woodpecker/code-vitals.yml` runs beside the build on every `main` push,

@@ -219,6 +219,18 @@ def test_a_plugin_setting_that_is_not_json_is_refused() -> None:
         settings.from_plugin_env({"PLUGIN_TRUNK": "main", "PLUGIN_AREAS": "version=1"})
 
 
+def test_a_private_repos_clone_token_is_accepted_and_is_not_a_setting() -> None:
+    text = CARD_EXAMPLE.replace(
+        "      writer_password:",
+        "      clone_token: {from_secret: github_token}\n      writer_password:",
+    )
+    assert "clone_token" in text
+    assert settings.from_workflow(text) == settings.from_workflow(CARD_EXAMPLE)
+    env = {"PLUGIN_TRUNK": "main", "PLUGIN_CLONE_TOKEN": "ghp_x"}
+    found = settings.from_plugin_env(env)
+    assert "ghp_x" not in found.as_json()
+
+
 def test_an_unknown_plugin_setting_is_refused() -> None:
     with pytest.raises(SettingsError, match=r"unknown setting\(s\) version_source"):
         settings.from_plugin_env({"PLUGIN_TRUNK": "main", "PLUGIN_VERSION_SOURCE": "[]"})

@@ -261,8 +261,9 @@ core, not saved for the `1.0.0` card, which is only the sign-off.
     into each repo (card #498): the plugin validates the settings and starts
     the collector through the socket, on `code-vitals_default` and
     `proxy-backend` (a plugin step's own network reaches neither Postgres nor
-    the OTLP collector). The collector clones the public repo itself
-    (`collect --fetch`, full history and tags), so the step needs no clone
+    the OTLP collector). The collector clones the repo itself
+    (`collect --fetch`, full history and tags; a private repo with its
+    `clone_token`), so the step needs no clone
     (`skip_clone: true`) and later changes ship through `:stable` alone. It
     mounts the docker socket, so the measured repo must be trusted in
     Woodpecker — as it had to be for the template.
@@ -276,3 +277,13 @@ core, not saved for the `1.0.0` card, which is only the sign-off.
     repo's rows; the same trust assumption as above (only the owner pushes,
     to every repo on this Woodpecker) covers it. The OTLP settings are not
     secret and are fixed in the plugin.
+  - **Private repos** (card #602) clone with the shared-layer `github_token`,
+    both in their own plugin step (`clone_token`) and in a deployment's
+    `collect` step, rather than Woodpecker's netrc (which needs each repo's
+    `netrc_trusted` to list the plugin) or a dedicated token per repo (made
+    by hand, outside any PR). It is already readable by every repo's
+    pipelines, so this adds no exposure; it reaches the collector only on
+    stdin, and git only through a one-command credential helper (README §
+    Measuring a private repo). A narrower `contents:read` token per private
+    repo is the upgrade if the shared token ever has to shrink. Private
+    repos are shown on the dashboard like public ones, behind Authentik.

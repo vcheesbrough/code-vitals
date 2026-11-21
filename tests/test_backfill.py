@@ -213,7 +213,7 @@ def test_cli_lists_repos_for_the_deploy_script(
     _registered(owner, ("v-note", "https://x/v.git", "master"), ("old", None, "main"))
     assert cli.main(["list-repos"], {cli.DATABASE_URL_ENV: writer}) == 0
     out = capsys.readouterr().out.splitlines()
-    assert "repo v-note https://x/v.git master" in out
+    assert "repo v-note https://x/v.git master public" in out
     assert "code-vitals list-repos: old has no URL; deployments skip it" in out
     assert not any(line.startswith("repo old") for line in out)
     # No deployment can clone it, so it must not hold a measure version back.

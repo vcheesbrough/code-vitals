@@ -6,12 +6,14 @@ OTLP), when the OTEL_* variables configure it.
 """
 
 import argparse
+import dataclasses
 import logging
 import os
 import re
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import TextIO
 
 import psycopg
 
@@ -35,6 +37,12 @@ PIPELINE_NUMBER_ENV = "CI_PIPELINE_NUMBER"
 # A repo's name: also its telemetry instance, and a word in shell scripts.
 REPO_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 
+
+TOKEN_STDIN = "--clone-token-stdin"
+TOKEN_STDIN_HELP = (
+    "read a private repo's clone token from the first line of stdin (never an"
+    " argument or a variable, which `docker inspect` would show)"
+)
 
 # `backfill-repo`'s exit status for a repo without a plugin step: skipped,
 # which scripts/run-collector.sh tells apart from a failure.
@@ -82,14 +90,19 @@ def build_parser(info: BuildInfo) -> argparse.ArgumentParser:
         help="clone the repo from --url first (a temporary full clone)",
     )
     collect_parser.add_argument(
+        TOKEN_STDIN,
+        action="store_true",
+        help=TOKEN_STDIN_HELP + "; with --fetch, the repo is recorded private, without it public",
+    )
+    collect_parser.add_argument(
         "--trigger", default=str(obs.Trigger.MANUAL), choices=[str(t) for t in obs.Trigger]
     )
     commands.add_parser(
         "list-repos",
         help="list the registered repos a deployment re-measures",
         description=(
-            "One `repo <name> <url> <trunk>` line per registered repo with a URL. A repo"
-            " without one is marked skipped."
+            "One `repo <name> <url> <trunk> <private|public>` line per registered repo with"
+            " a URL. A repo without one is marked skipped."
         ),
     )
     backfill_parser = commands.add_parser(
@@ -107,6 +120,7 @@ def build_parser(info: BuildInfo) -> argparse.ArgumentParser:
     backfill_parser.add_argument("--repo", required=True, type=_repo_name)
     backfill_parser.add_argument("--url", required=True)
     backfill_parser.add_argument("--trunk", required=True)
+    backfill_parser.add_argument(TOKEN_STDIN, action="store_true", help=TOKEN_STDIN_HELP)
     status_parser = commands.add_parser(
         "check-status",
         help="check the repos a deployment collected",
@@ -148,6 +162,7 @@ def _repo_name(value: str) -> str:
 def main(
     argv: Sequence[str] | None = None,
     environ: Mapping[str, str] | None = None,
+    stdin: TextIO | None = None,
 ) -> int:
     environ = os.environ if environ is None else environ
     info = load_build_info()
@@ -171,6 +186,14 @@ def main(
         except settings.SettingsError as error:
             print(f"code-vitals collect: invalid settings: {error}", file=sys.stderr)
             return 2
+    token = None
+    if getattr(args, "clone_token_stdin", False):
+        token = (stdin or sys.stdin).readline().strip()
+        if not token:
+            print(
+                f"code-vitals {args.command}: {TOKEN_STDIN} but no token on stdin", file=sys.stderr
+            )
+            return 2
     _log_problems_to_stderr()
     instance = args.repo if args.command in ("collect", "backfill-repo") else args.command
     try:
@@ -186,13 +209,17 @@ def main(
         if args.command == "list-repos":
             return _list_repos(conninfo)
         if args.command == "backfill-repo":
-            return _backfill_repo(conninfo, args, info, environ)
+            return _backfill_repo(conninfo, args, info, environ, token)
         if args.command == "check-status":
             return _check_status(conninfo, args.repo)
         if args.command == "retire":
             return _retire(conninfo, args)
         assert repo_settings is not None
-        return _collect(conninfo, repo_settings.repo(args.repo, args.url), args, info, environ)
+        repo = repo_settings.repo(args.repo, args.url)
+        if args.fetch:
+            # A plugin run: it cloned the repo with a token exactly when it is private.
+            repo = dataclasses.replace(repo, private=token is not None)
+        return _collect(conninfo, repo, args, info, environ, token)
     finally:
         if not running.shutdown():
             print("code-vitals: telemetry did not flush in time; some was dropped", file=sys.stderr)
@@ -230,6 +257,7 @@ def _collect(
     args: argparse.Namespace,
     info: BuildInfo,
     environ: Mapping[str, str],
+    token: str | None,
 ) -> int:
     source = repo.url if args.fetch else args.clone
     if args.fetch and repo.url is None:
@@ -244,6 +272,7 @@ def _collect(
             obs.Trigger(args.trigger),
             info,
             pipeline_number=environ.get(PIPELINE_NUMBER_ENV) or None,
+            clone_token=token,
         )
     except Exception as error:
         print(f"code-vitals collect: {repo.name} failed: {error}", file=sys.stderr)
@@ -283,7 +312,8 @@ def _list_repos(conninfo: str) -> int:
         if repo.url is None:
             print(f"code-vitals list-repos: {repo.name} has no URL; deployments skip it")
         else:
-            print(f"repo {repo.name} {repo.url} {repo.trunk}")
+            access = "private" if repo.private else "public"
+            print(f"repo {repo.name} {repo.url} {repo.trunk} {access}")
     return 0
 
 
@@ -292,6 +322,7 @@ def _backfill_repo(
     args: argparse.Namespace,
     info: BuildInfo,
     environ: Mapping[str, str],
+    token: str | None,
 ) -> int:
     name = args.repo
     print(f"code-vitals backfill-repo: {name} from {args.url} ({args.trunk})")
@@ -299,9 +330,10 @@ def _backfill_repo(
         try:
             result = backfill_repo(
                 conninfo,
-                RegisteredRepo(name, args.url, args.trunk),
+                RegisteredRepo(name, args.url, args.trunk, private=token is not None),
                 info,
                 pipeline_number=environ.get(PIPELINE_NUMBER_ENV) or None,
+                clone_token=token,
             )
         except Exception as error:
             print(f"code-vitals backfill-repo: {name} failed: {error}", file=sys.stderr)

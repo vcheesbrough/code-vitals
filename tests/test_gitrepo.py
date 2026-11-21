@@ -1,12 +1,15 @@
+import os
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from code_vitals.gitrepo import Clone, GitError, clone_from
+from code_vitals.gitrepo import TOKEN_ENV, Clone, GitError, clone_from, credential_config
 
-from .gitfixture import make_repo, three_commit_history
+from .git_http_server import GitHttpServer
+from .gitfixture import FixtureRepo, make_repo, three_commit_history
 
 
 def test_history_is_first_parent_oldest_first(tmp_path: Path) -> None:
@@ -127,3 +130,146 @@ def test_clone_from_never_waits_on_a_credential_prompt(
     with pytest.raises(GitError, match="terminal prompts disabled"):
         clone_from("https://example.invalid/private.git", tmp_path / "x")
     assert seen["GIT_TERMINAL_PROMPT"] == "0"
+
+
+# --- private repos (card #602) ---------------------------------------------------
+
+TOKEN = "ghp_t0kenForTheTest"
+
+
+@pytest.fixture
+def private(tmp_path: Path) -> Iterator[tuple[GitHttpServer, str, FixtureRepo]]:
+    """The three-commit history, served only to requests carrying TOKEN."""
+    (tmp_path / "served").mkdir()
+    source = three_commit_history(tmp_path / "served")
+    with GitHttpServer(tmp_path / "served", TOKEN) as server:
+        yield server, server.url("repo"), source
+
+
+@pytest.fixture
+def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A HOME whose git config stores every credential git approves: what a
+    clone must not let happen to its token."""
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".gitconfig").write_text("[credential]\n\thelper = store\n")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("GIT_CONFIG_GLOBAL", raising=False)
+    return home
+
+
+def _files_containing(root: Path, text: str) -> list[Path]:
+    return [p for p in root.rglob("*") if p.is_file() and text.encode() in p.read_bytes()]
+
+
+def test_a_private_repo_is_cloned_with_its_token(
+    tmp_path: Path, private: tuple[GitHttpServer, str, FixtureRepo], isolated_home: Path
+) -> None:
+    server, url, source = private
+    clone = clone_from(url, tmp_path / "fetched", TOKEN)
+
+    assert [sha for sha, _ in clone.first_parent_history(source.shas[-1])] == source.shas
+    assert any(a.startswith("Basic ") for a in server.authorizations)
+    # Nothing can read the token back: not the clone's config (its remote is
+    # the plain URL), not any file in it, not a credential store.
+    config = (tmp_path / "fetched" / ".git" / "config").read_text()
+    assert f"url = {url}\n" in config
+    assert "credential" not in config
+    assert _files_containing(tmp_path / "fetched", TOKEN) == []
+    assert not (isolated_home / ".git-credentials").exists()
+    assert _files_containing(isolated_home, TOKEN) == []
+
+
+def test_a_private_repo_without_its_token_fails_without_a_prompt(
+    tmp_path: Path, private: tuple[GitHttpServer, str, FixtureRepo], isolated_home: Path
+) -> None:
+    server, url, _ = private
+    with pytest.raises(GitError, match=f"git clone of {url} failed"):
+        clone_from(url, tmp_path / "fetched")
+    assert server.authorizations and set(server.authorizations) == {""}
+
+
+def test_a_wrong_token_fails_and_is_not_reported(
+    tmp_path: Path, private: tuple[GitHttpServer, str, FixtureRepo], isolated_home: Path
+) -> None:
+    _, url, _ = private
+    wrong = "ghp_wr0ngTokenValue"
+    with pytest.raises(GitError) as raised:
+        clone_from(url, tmp_path / "fetched", wrong)
+    assert wrong not in str(raised.value)
+    assert _files_containing(isolated_home, wrong) == []
+
+
+def test_the_token_is_on_no_command_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[list[str], dict[str, str]]] = []
+
+    def fake_run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        seen.append((args, kwargs["env"]))
+        return subprocess.CompletedProcess(args, 128, "", f"denied for {TOKEN}")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(GitError) as raised:
+        clone_from("https://example.invalid/private.git", tmp_path / "x", TOKEN)
+    [(args, env)] = seen
+    assert not any(TOKEN in arg for arg in args)
+    assert env[TOKEN_ENV] == TOKEN
+    # Even if git ever printed it, the error would not carry it.
+    assert TOKEN not in str(raised.value)
+
+
+def test_a_public_clone_gets_no_token_and_no_helper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[tuple[list[str], dict[str, str]]] = []
+
+    def fake_run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        seen.append((args, kwargs["env"]))
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setenv(TOKEN_ENV, "leftover")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    clone_from("https://example.invalid/public.git", tmp_path / "x")
+    [(args, env)] = seen
+    assert args[:2] == ["git", "clone"]
+    assert TOKEN_ENV not in env
+
+
+def _filled(config: list[str], request: str, home: Path) -> str:
+    """What `git credential fill` answers for `request` under `config`, with
+    the token set and no prompt to fall back on."""
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_ASKPASS": "",
+        "SSH_ASKPASS": "",
+        TOKEN_ENV: TOKEN,
+    }
+    env.pop("GIT_CONFIG_GLOBAL", None)
+    result = subprocess.run(
+        ["git", *config, "credential", "fill"],
+        input=request,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.stdout
+
+
+@pytest.mark.parametrize(
+    "other",
+    [
+        "protocol=https\nhost=evil.example\n\n",  # a redirect to another host
+        "protocol=http\nhost=github.com\n\n",  # a downgrade to cleartext
+        "protocol=https\nhost=github.com:8443\n\n",  # another port
+    ],
+)
+def test_the_token_is_offered_to_the_clones_origin_only(isolated_home: Path, other: str) -> None:
+    config = credential_config("https://github.com/vcheesbrough/mini-config.git")
+    own = _filled(
+        config, "protocol=https\nhost=github.com\npath=vcheesbrough/x.git\n\n", isolated_home
+    )
+    assert f"password={TOKEN}" in own
+    assert TOKEN not in _filled(config, other, isolated_home)

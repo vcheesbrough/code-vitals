@@ -38,14 +38,16 @@ class RegisteredRepo:
     name: str
     url: str | None
     trunk: str
+    # Cloned with a token (migration 0008).
+    private: bool = False
 
 
 def registered_repos(conninfo: str) -> list[RegisteredRepo]:
     with psycopg.connect(conninfo) as conn, obs.db_span("SELECT", "registered repos"):
-        rows = conn.execute("SELECT name, url, trunk FROM repo ORDER BY name").fetchall()
+        rows = conn.execute("SELECT name, url, trunk, private FROM repo ORDER BY name").fetchall()
     return [
-        RegisteredRepo(str(name), None if url is None else str(url), str(trunk))
-        for name, url, trunk in rows
+        RegisteredRepo(str(name), None if url is None else str(url), str(trunk), bool(private))
+        for name, url, trunk, private in rows
     ]
 
 
@@ -82,14 +84,17 @@ def backfill_repo(
     *,
     measures: Sequence[Measure] | None = None,
     pipeline_number: str | None = None,
+    clone_token: str | None = None,
 ) -> BackfillResult:
-    """Clone the repo, then skip it (and mark it skipped) or catch it up and
-    check it. Raises for a clone that fails or settings that are invalid."""
+    """Clone the repo (with `clone_token`, if it is private), then skip it
+    (and mark it skipped) or catch it up and check it. Raises for a clone
+    that fails — a private repo without its token included, which is a
+    failure, never a skip — or settings that are invalid."""
     if repo.url is None:
         raise ValueError(f"{repo.name} has no URL to clone")
     with contextlib.ExitStack() as stack:
         tmp = stack.enter_context(tempfile.TemporaryDirectory(prefix="code-vitals-clone-"))
-        clone = clone_from(repo.url, Path(tmp) / "clone")
+        clone = clone_from(repo.url, Path(tmp) / "clone", clone_token)
         found = settings_at_trunk(clone, repo.trunk)
         if found is None:
             log.info("%s has no code-vitals plugin step; skipped", repo.name)

@@ -347,7 +347,8 @@ def check_datasets(contents: dict[str, str]) -> dict[str, int]:
 # share of its limit (#552). The rows grow with every measured repo's trunk
 # pipeline, which never deploys code-vitals, so the collector counts the same
 # rows after each `collect` too (card #553), from the manifest this module
-# renders (row_limit_manifest): the headroom covers the growth of one push.
+# renders (row_limit_manifest): the headroom covers the growth of a typical push
+# (a repo's first run, which backfills its history, can take a chart past it).
 ROW_LIMIT_HEADROOM = 0.8
 # Superset's own defaults, set by superset_config.py from here so that the
 # manifest the collector checks against has the limits Superset applies.

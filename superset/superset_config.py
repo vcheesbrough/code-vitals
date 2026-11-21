@@ -10,6 +10,7 @@ import os
 from datetime import timedelta
 from typing import Any
 
+import code_vitals_dashboard
 from code_vitals_auth import AUTHENTIK_URL, environment_names, user_info_from_claims
 from flask_appbuilder.exceptions import InvalidLoginAttempt
 from flask_appbuilder.security.manager import AUTH_OAUTH
@@ -47,6 +48,12 @@ SESSION_COOKIE_SAMESITE = "Lax"
 # Group removal in Authentik takes effect at the next sign-in, so this bounds
 # how long a removed user keeps access.
 PERMANENT_SESSION_LIFETIME = timedelta(hours=12)
+
+# A chart query's default row limit and the cap on any: Superset's defaults,
+# set from code_vitals_dashboard, whose row-limit manifest the collector checks
+# after each collect (card #553) must have the limits Superset applies.
+ROW_LIMIT = code_vitals_dashboard.ROW_LIMIT
+SQL_MAX_ROW = code_vitals_dashboard.SQL_MAX_ROW
 
 # No Redis: in-process caches are enough for one gunicorn worker.
 CACHE_CONFIG = {"CACHE_TYPE": "SimpleCache", "CACHE_DEFAULT_TIMEOUT": 300}

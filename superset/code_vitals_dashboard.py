@@ -31,10 +31,15 @@ and fails if anything the bundle no longer has is still there (other than what
 is kept because something made in Superset uses it), or if a chart's query is
 near its row limit (card #552): scripts/smoke-superset.sh runs it in the
 deployed Superset container.
+
+`--row-limits` needs no Superset: it prints the manifest of the charts' row
+limits (row_limit_manifest) that the collector checks after each collect,
+between deploys (card #553), kept in src/code_vitals/chart_rows.toml.
 """
 
 from __future__ import annotations
 
+import json
 import sys
 import uuid
 from pathlib import Path
@@ -339,10 +344,17 @@ def check_datasets(contents: dict[str, str]) -> dict[str, int]:
 # returns the empty groups of every other measure in its dataset, dropped only
 # after the query (card #549). Past its row limit Superset truncates the
 # result without an error, so `--check` fails once a chart's rows pass this
-# share of its limit (#552). It runs only on a code-vitals deploy, while the
-# rows grow with every measured repo's trunk pipeline: the headroom must cover
-# the growth between two deploys.
+# share of its limit (#552). The rows grow with every measured repo's trunk
+# pipeline, which never deploys code-vitals, so the collector counts the same
+# rows after each `collect` too (card #553), from the manifest this module
+# renders (row_limit_manifest): the headroom covers the growth of one push.
 ROW_LIMIT_HEADROOM = 0.8
+# Superset's own defaults, set by superset_config.py from here so that the
+# manifest the collector checks against has the limits Superset applies.
+ROW_LIMIT = 50000
+SQL_MAX_ROW = 100000
+# Where the collector reads the manifest, relative to the repo root.
+MANIFEST_PATH = "src/code_vitals/chart_rows.toml"
 
 
 def grouped_by(params: dict[str, Any]) -> list[str]:
@@ -458,18 +470,106 @@ def check_row_limits(contents: dict[str, str]) -> tuple[list[tuple[str, int, int
     return counts, row_limit_report(counts)
 
 
-USAGE = "usage: python -m code_vitals_dashboard [--check] <bundle-directory>"
+# What the collector counts a dataset as: a CTE of this name.
+MANIFEST_SOURCE = "d"
+
+
+def _toml_string(value: str) -> str:
+    # JSON's escapes are a subset of a TOML basic string's.
+    return json.dumps(value, ensure_ascii=False)
+
+
+def row_limit_manifest(contents: dict[str, str]) -> str:
+    """The row-limit manifest (MANIFEST_PATH) the collector checks after each
+    collect (card #553), as TOML: the headroom, and for each of the bundle's
+    charts with an x-axis its file, name, limit (ROW_LIMIT, SQL_MAX_ROW) and
+    row_count_sql over its dataset read as MANIFEST_SOURCE; each dataset's SQL
+    once. Rendered, never edited by hand: tests/test_row_limits.py fails when
+    the file differs from the bundle."""
+    import tomllib
+
+    import yaml
+
+    datasets = {}
+    for name, text in contents.items():
+        if name.startswith("datasets/"):
+            declared = yaml.safe_load(text)
+            datasets[str(declared["uuid"])] = declared
+    used: dict[str, str] = {}
+    charts: list[dict[str, Any]] = []
+    for name, text in sorted(contents.items()):
+        if not name.startswith("charts/"):
+            continue
+        chart = yaml.safe_load(text)
+        params = chart["params"]
+        if not grouped_by(params):
+            continue
+        dataset = datasets[str(chart["dataset_uuid"])]
+        table = str(dataset["table_name"])
+        used[table] = dataset["sql"] or f"SELECT * FROM {table}\n"
+        expressions = {
+            c["column_name"]: c["expression"]
+            for c in dataset.get("columns") or []
+            if c.get("expression")
+        }
+        charts.append(
+            {
+                "file": name.removeprefix("charts/"),
+                "name": str(chart["slice_name"]),
+                "dataset": table,
+                "limit": row_limit(params, ROW_LIMIT, SQL_MAX_ROW),
+                "count": row_count_sql(params, MANIFEST_SOURCE, expressions),
+            }
+        )
+    lines = [
+        "# The dashboard charts' row limits, which the collector checks after each",
+        "# collect (card #553). Rendered from superset/dashboard/: do not edit, run",
+        f"#   uv run python superset/code_vitals_dashboard.py --row-limits superset/dashboard"
+        f" > {MANIFEST_PATH}",
+        "# tests/test_row_limits.py fails when this differs from the bundle.",
+        "",
+        f"headroom = {ROW_LIMIT_HEADROOM!r}",
+        f"source = {_toml_string(MANIFEST_SOURCE)}",
+    ]
+    for table, sql in sorted(used.items()):
+        if "'''" in sql:
+            raise ValueError(f"dataset {table}'s SQL cannot be a TOML literal string")
+        lines += ["", f"[datasets.{table}]", f"sql = '''\n{sql}'''"]
+    for chart in charts:
+        lines += ["", "[[charts]]"]
+        for key, value in chart.items():
+            rendered = str(value) if isinstance(value, int) else _toml_string(value)
+            lines.append(f"{key} = {rendered}")
+    text = "\n".join(lines) + "\n"
+    parsed = tomllib.loads(text)
+    expected = {
+        "headroom": ROW_LIMIT_HEADROOM,
+        "source": MANIFEST_SOURCE,
+        "datasets": {table: {"sql": sql} for table, sql in used.items()},
+        "charts": charts,
+    }
+    if parsed != expected:
+        raise ValueError("the row-limit manifest does not read back as rendered")
+    return text
+
+
+USAGE = "usage: python -m code_vitals_dashboard [--check | --row-limits] <bundle-directory>"
 
 
 def main(argv: list[str]) -> int:
     args = argv[1:]
     check = args[:1] == ["--check"]
-    if check:
+    manifest = args[:1] == ["--row-limits"]
+    if check or manifest:
         args = args[1:]
     if len(args) != 1:
         print(USAGE, file=sys.stderr)
         return 2
     contents = read_bundle(Path(args[0]))
+    if manifest:
+        # Needs no Superset: the collector's copy of the charts' row limits.
+        sys.stdout.write(row_limit_manifest(contents))
+        return 0
     from superset.app import create_app
 
     with create_app().app_context():

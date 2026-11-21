@@ -5,7 +5,9 @@
 -- statement is idempotent.
 --
 --   code_vitals_writer — the collector: reads and writes the tables, never
---                        owns, alters or drops them.
+--                        owns, alters or drops them; reads the reader's
+--                        views too, to count the dashboard charts' rows
+--                        after a collect (card #553).
 --   code_vitals_reader — Superset: SELECT on the current_* and freshness views
 --                        only, never a base table.
 
@@ -34,4 +36,4 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO code_vitals_writer;
 
 GRANT SELECT
     ON current_measurement, current_function_complexity, freshness
-    TO code_vitals_reader;
+    TO code_vitals_reader, code_vitals_writer;

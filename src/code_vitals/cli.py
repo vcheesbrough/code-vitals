@@ -17,7 +17,7 @@ from typing import TextIO
 
 import psycopg
 
-from code_vitals import obs, plugin, settings, telemetry
+from code_vitals import obs, plugin, row_limits, settings, telemetry
 from code_vitals.backfill import Outcome, RegisteredRepo, backfill_repo, registered_repos
 from code_vitals.build_info import BuildInfo, load_build_info
 from code_vitals.checks import check_status
@@ -312,10 +312,35 @@ def _collect(
         f"code-vitals collect: {repo.name}: {result.commits_measured} commit(s) measured"
         f" of {result.backlog} to do (run {result.run_id})"
     )
+    status = 0
     if result.commits_failed:
         print(
             f"code-vitals collect: {repo.name}: {result.commits_failed} commit(s) failed;"
             " the next run retries them",
+            file=sys.stderr,
+        )
+        status = 1
+    return max(status, _check_row_limits(conninfo, repo.name))
+
+
+def _check_row_limits(conninfo: str, name: str) -> int:
+    """The dashboard charts' row limits, where the data arrives (card #553):
+    1 when a chart is near its limit (the warning names it) or the rows
+    cannot be counted. The run is recorded either way."""
+    try:
+        checked = row_limits.check_row_limits(conninfo, name)
+    except Exception as error:
+        print(
+            f"code-vitals collect: the dashboard charts' row limits could not be checked: {error}",
+            file=sys.stderr,
+        )
+        return 1
+    if checked.summary:
+        print(f"code-vitals collect: {checked.summary}")
+    if checked.problems:
+        print(
+            f"code-vitals collect: {len(checked.problems)} dashboard chart(s) near their row"
+            " limit; recorded, but this step fails until superset/dashboard/ makes room",
             file=sys.stderr,
         )
         return 1

@@ -104,7 +104,15 @@ def test_all_three_signals_arrive_with_identity_and_correlation(
     db_attributes = attrs(db.attributes)
     assert db_attributes["db.system.name"] == "postgresql"
     assert "INSERT INTO" not in str(db_attributes)  # no SQL text on spans
-    assert {s.trace_id for s in spans} == {root.trace_id}
+    # After the run, the charts' row-limit check (card #553) is a trace of its
+    # own: a count per dataset, never SQL text.
+    (check,) = [s for s in spans if s.name == "check-row-limits"]
+    assert attrs(check.attributes)["code_vitals.repo"] == "fixture"
+    assert attrs(check.attributes)["code_vitals.charts.near_limit"] == 0
+    counted = [s for s in spans if s.name == "SELECT count chart rows"]
+    assert counted and all(s.trace_id == check.trace_id for s in counted)
+    assert "SELECT count" not in str([attrs(s.attributes) for s in counted])
+    assert {s.trace_id for s in spans} == {root.trace_id, check.trace_id}
     by_id = {s.span_id: s for s in spans}
     for tool in ("tokei", "lizard"):
         tool_spans = [s for s in spans if s.name == tool]

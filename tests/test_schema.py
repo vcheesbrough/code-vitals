@@ -219,6 +219,15 @@ def test_writer_reads_and_writes_tables(db: str) -> None:
         assert conn.execute("SELECT count(*) FROM run").fetchone() == (1,)
 
 
+def test_writer_reads_the_published_views(db: str) -> None:
+    # To count the dashboard charts' rows after a collect (card #553).
+    _seed(db)
+    with psycopg.connect(role_url(db, "code_vitals_writer")) as conn:
+        assert len(conn.execute("SELECT * FROM current_measurement").fetchall()) == 3
+        conn.execute("SELECT * FROM current_function_complexity").fetchall()
+        conn.execute("SELECT * FROM freshness").fetchall()
+
+
 @pytest.mark.parametrize(
     "statement",
     [

@@ -13,7 +13,9 @@
 #       database so measure versions complete without it (card #572). The
 #       repos collected are written to
 #       .collected-repos for `status`. Each repo's runs are serialized by its
-#       advisory lock.
+#       advisory lock. A private repo (card #602) is cloned with
+#       CODE_VITALS_CLONE_TOKEN, which its container reads on stdin; without
+#       the token it fails, never skipped. Public repos are cloned anonymously.
 #   run-collector.sh <dev|prod> <collector-image-ref> status
 #       `check-status` over the repos in .collected-repos: every version this
 #       build registers is complete, and each of those repos' last run
@@ -23,7 +25,8 @@
 # container is also on proxy-backend so its telemetry reaches monitor-alloy,
 # with deployment.environment.name set to the environment.
 #
-# Environment (from Woodpecker secrets; never printed): CODE_VITALS_WRITER_PASSWORD
+# Environment (from Woodpecker secrets; never printed): CODE_VITALS_WRITER_PASSWORD,
+# and CODE_VITALS_CLONE_TOKEN for private repos (optional while there are none).
 # Run from the repository root.
 #
 # Nothing here reads input unless redirected (see scripts/deploy-stack.sh).
@@ -80,6 +83,10 @@ OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 OTEL_RESOURCE_ATTRIBUTES="deployment.environment.name=$env"
 export CODE_VITALS_DATABASE_URL OTEL_EXPORTER_OTLP_ENDPOINT OTEL_EXPORTER_OTLP_PROTOCOL \
   OTEL_RESOURCE_ATTRIBUTES
+# Kept out of every docker command's environment: only a private repo's
+# container gets it, on its stdin.
+token=$(printenv CODE_VITALS_CLONE_TOKEN || true)
+unset CODE_VITALS_CLONE_TOKEN
 # Woodpecker sets it in every step; the run's span records it.
 CI_PIPELINE_NUMBER="${CI_PIPELINE_NUMBER:-}"
 export CI_PIPELINE_NUMBER
@@ -97,17 +104,26 @@ trap cleanup EXIT
 # run <label> <command…> — the image's command in a container of its own, on
 # the project's network and proxy-backend (`docker run` joins one network).
 # `-e NAME` copies each value from this environment, so the password is on no
-# command line.
+# command line. With `--interactive` first, the container also gets this
+# function's stdin: how a private repo's clone token reaches it, which `-e`
+# would leave in `docker inspect`.
 run() {
+  interactive=
+  if [ "$1" = --interactive ]; then
+    interactive=--interactive
+    shift
+  fi
   label=$1
   shift
   # Explicit returns: `set -e` does not apply where run's status is tested.
-  cid=$(docker create -e CODE_VITALS_DATABASE_URL -e OTEL_EXPORTER_OTLP_ENDPOINT \
+  # shellcheck disable=SC2086  # $interactive is one flag or nothing
+  cid=$(docker create $interactive -e CODE_VITALS_DATABASE_URL -e OTEL_EXPORTER_OTLP_ENDPOINT \
     -e OTEL_EXPORTER_OTLP_PROTOCOL -e OTEL_RESOURCE_ATTRIBUTES -e CI_PIPELINE_NUMBER \
     --network "${project}_default" "$image" "$@") || return
   echo "$cid" > "$work/cid.$label"
   docker network connect proxy-backend "$cid" || return
-  docker start --attach "$cid"
+  # shellcheck disable=SC2086
+  docker start --attach $interactive "$cid"
 }
 
 if [ "$mode" = status ]; then
@@ -125,13 +141,20 @@ run list list-repos > "$work/list"
 grep -v '^repo ' "$work/list" || true
 : > "$collected"
 started=0
-while read -r tag name url trunk rest; do
+while read -r tag name url trunk access rest; do
   [ "$tag" = repo ] || continue
   # list-repos writes names, URLs and trunks the database's checks allow;
   # refuse anything else rather than pass it to a shell or a file name.
   case "$name$trunk" in
     *[!A-Za-z0-9._/-]*)
-      echo "ERROR: unexpected repo line: $tag $name $url $trunk $rest" >&2
+      echo "ERROR: unexpected repo line: $tag $name $url $trunk $access $rest" >&2
+      exit 1
+      ;;
+  esac
+  case "$access" in
+    private | public) ;;
+    *)
+      echo "ERROR: unexpected repo line: $tag $name $url $trunk $access $rest" >&2
       exit 1
       ;;
   esac
@@ -140,13 +163,21 @@ while read -r tag name url trunk rest; do
     exit 1
     ;;
   esac
-  echo "==> $env: backfill $name from $url ($trunk)"
+  echo "==> $env: backfill $name from $url ($trunk, $access)"
   echo "$name" >> "$work/names"
   (
     status=0
-    run "$name" backfill-repo --repo "$name" --url "$url" --trunk "$trunk" 2>&1 || status=$?
+    if [ "$access" = public ]; then
+      run "$name" backfill-repo --repo "$name" --url "$url" --trunk "$trunk" 2>&1 || status=$?
+    elif [ -z "$token" ]; then
+      echo "ERROR: $name is private and CODE_VITALS_CLONE_TOKEN is not set" >&2
+      status=1
+    else
+      printf '%s\n' "$token" | run --interactive "$name" backfill-repo --repo "$name" \
+        --url "$url" --trunk "$trunk" --clone-token-stdin 2>&1 || status=$?
+    fi
     echo "$status" > "$work/status.$name"
-  ) | sed "s|^|$name: |" &
+  ) 2>&1 | sed "s|^|$name: |" &
   started=$((started + 1))
 done < "$work/list"
 wait

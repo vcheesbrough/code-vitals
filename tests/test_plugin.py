@@ -179,8 +179,15 @@ def test_a_docker_failure_fails_the_step_and_leaves_nothing_behind(
         ({"CI_WORKFLOW_NAME": None}, r"must be in \.woodpecker/code-vitals\.yml.*''"),
         ({"CI_REPO_NAME": None}, "CI_REPO_NAME must be the repo's name"),
         ({"CI_REPO_NAME": "a b"}, "CI_REPO_NAME must be the repo's name"),
-        ({"CI_REPO_CLONE_URL": "git@github.com:x/y.git"}, "public http"),
-        ({"CI_REPO_CLONE_URL": "https://user:token@github.com/x/y.git"}, "public http"),
+        ({"CI_REPO_CLONE_URL": "git@github.com:x/y.git"}, "clone URL, without credentials"),
+        (
+            {"CI_REPO_CLONE_URL": "https://user:token@github.com/x/y.git"},
+            "clone URL, without credentials",
+        ),
+        (
+            {"CI_REPO_CLONE_URL": "https://x-access-token@github.com/x/y.git"},
+            "clone URL, without credentials",
+        ),
     ],
 )
 def test_a_misconfigured_step_fails_before_docker(
@@ -217,3 +224,52 @@ def test_the_cli_runs_the_plugin_without_a_database(
 
 def test_the_collector_image_is_this_builds_version() -> None:
     assert plugin.collector_image(BUILD) == "registry.desync.link/code-vitals-collector:0.13.42"
+
+
+TOKEN = "ghp_PluginT0ken"
+
+
+def test_a_private_repos_token_reaches_the_collector_on_stdin_only(
+    docker: tuple[str, Path], capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path, log = docker
+    step = {**STEP_ENV, "PLUGIN_CLONE_TOKEN": TOKEN}
+    for name, value in step.items():
+        monkeypatch.setenv(name, value)
+    assert plugin.run(step, BUILD, docker=path) == 0
+
+    calls = _calls(log)
+    create, start = calls[0]["args"], calls[2]["args"]
+    image = create.index("registry.desync.link/code-vitals-collector:0.13.42")
+    assert "--interactive" in create[:image]
+    assert create[image + 1 :] == [
+        "collect",
+        "--repo",
+        "v-note",
+        "--url",
+        "https://github.com/vcheesbrough/v-note.git",
+        "--fetch",
+        "--clone-token-stdin",
+        "--trigger",
+        "push",
+    ]
+    assert start == ["start", "--attach", "--interactive", "cid123"]
+    # On the started collector's stdin, and nowhere else: no argument, no
+    # variable docker or the container is given, no other call's input.
+    assert calls[2]["stdin"] == f"{TOKEN}\n"
+    assert [c["stdin"] for i, c in enumerate(calls) if i != 2] == ["", "", ""]
+    assert not any(TOKEN in " ".join(c["args"]) for c in calls)
+    assert not any(TOKEN in json.dumps(c["env"]) for c in calls)
+    # Nor is it a setting the collector records.
+    assert TOKEN not in calls[0]["env"]["CODE_VITALS_SETTINGS"]
+    out = capfd.readouterr()
+    assert "(private: cloned with clone_token)" in out.out
+    assert TOKEN not in out.out + out.err
+
+
+def test_a_public_repo_is_cloned_without_a_token(docker: tuple[str, Path]) -> None:
+    path, log = docker
+    assert plugin.run(STEP_ENV, BUILD, docker=path) == 0
+    calls = _calls(log)
+    assert "--interactive" not in calls[0]["args"] + calls[2]["args"]
+    assert "--clone-token-stdin" not in calls[0]["args"]

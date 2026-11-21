@@ -5,7 +5,8 @@
 # stage. A fake `docker` first on PATH records every call and the environment
 # each container would be given. Its containers: `list-repos` prints
 # $WORK_DIR/list; `backfill-repo --repo R` exits with $WORK_DIR/exit.R when it
-# exists, as `docker start --attach` passes on the container's status.
+# exists, as `docker start --attach` passes on the container's status. An
+# interactive start records what it was given on stdin in $WORK_DIR/stdin.R.
 
 set -eu
 
@@ -22,7 +23,7 @@ cat > "$WORK_DIR/bin/docker" <<EOF
 echo "\$*" >> "$WORK_DIR/docker-calls"
 case "\$1" in
   create)
-    echo "url=\$CODE_VITALS_DATABASE_URL otel=\$OTEL_EXPORTER_OTLP_ENDPOINT attrs=\$OTEL_RESOURCE_ATTRIBUTES pipeline=\$CI_PIPELINE_NUMBER" >> "$WORK_DIR/create-env"
+    echo "url=\$CODE_VITALS_DATABASE_URL otel=\$OTEL_EXPORTER_OTLP_ENDPOINT attrs=\$OTEL_RESOURCE_ATTRIBUTES pipeline=\$CI_PIPELINE_NUMBER token=\${CODE_VITALS_CLONE_TOKEN:-}" >> "$WORK_DIR/create-env"
     case "\$*" in
       *" list-repos") echo cid-list ;;
       *" check-status"*) echo cid-status ;;
@@ -32,6 +33,10 @@ case "\$1" in
     ;;
   start)
     cid=\$3
+    if [ "\$cid" = --interactive ]; then
+      cid=\$4
+      cat > "$WORK_DIR/stdin.\${cid#cid-}"
+    fi
     case "\$cid" in
       cid-list) cat "$WORK_DIR/list" ;;
       cid-status) echo "check-status ran" ;;
@@ -62,15 +67,26 @@ run() {
         CI_PIPELINE_NUMBER=42 sh "$UNDER_TEST" "$@") > "$WORK_DIR/out" 2>&1
 }
 
+# run_token <token> <args…> — run, with CODE_VITALS_CLONE_TOKEN set.
+run_token() {
+    token=$1
+    shift
+    : > "$WORK_DIR/docker-calls"
+    : > "$WORK_DIR/create-env"
+    (cd "$WORK_DIR/repo" && env PATH="$WORK_DIR/bin:$PATH" CODE_VITALS_WRITER_PASSWORD=wpw0123 \
+        CODE_VITALS_CLONE_TOKEN="$token" CI_PIPELINE_NUMBER=42 sh "$UNDER_TEST" "$@") \
+        > "$WORK_DIR/out" 2>&1
+}
+
 calls() { cat "$WORK_DIR/docker-calls"; }
 out() { cat "$WORK_DIR/out"; }
 collected() { cat "$WORK_DIR/repo/.collected-repos"; }
 
 cat > "$WORK_DIR/list" <<'EOF'
 code-vitals: telemetry off (no OTEL_* variables set)
-repo bored https://github.com/vcheesbrough/bored.git main
-repo v-note https://github.com/vcheesbrough/v-note.git master
-repo newcomer https://github.com/example/newcomer.git trunk
+repo bored https://github.com/vcheesbrough/bored.git main public
+repo v-note https://github.com/vcheesbrough/v-note.git master public
+repo newcomer https://github.com/example/newcomer.git trunk public
 EOF
 
 # --- repos: every registered repo backfilled, in its own container ------------
@@ -106,7 +122,7 @@ for repo in list bored v-note newcomer; do
     fi
 done
 
-if [ "$(sort -u "$WORK_DIR/create-env")" = "url=postgresql://code_vitals_writer:wpw0123@code-vitals-dev-db:5432/code_vitals otel=http://monitor-alloy:4318 attrs=deployment.environment.name=dev pipeline=42" ] \
+if [ "$(sort -u "$WORK_DIR/create-env")" = "url=postgresql://code_vitals_writer:wpw0123@code-vitals-dev-db:5432/code_vitals otel=http://monitor-alloy:4318 attrs=deployment.environment.name=dev pipeline=42 token=" ] \
     && ! calls | grep -q "wpw0123"; then
     pass "repos: the writer's URL and the environment's telemetry reach every container by environment only"
 else
@@ -134,6 +150,52 @@ else
 fi
 rm -f "$WORK_DIR/exit.bored" "$WORK_DIR/exit.v-note"
 
+# --- a private repo: its token on stdin, public repos exactly as before --------
+TOKEN=ghp_t0ken
+cat > "$WORK_DIR/list" <<'EOF'
+repo bored https://github.com/vcheesbrough/bored.git main public
+repo mini-config https://github.com/vcheesbrough/mini-config.git master private
+EOF
+rm -f "$WORK_DIR"/stdin.*
+if run_token "$TOKEN" dev "$IMAGE" repos \
+    && calls | grep -q "^create --interactive -e CODE_VITALS_DATABASE_URL .* $IMAGE backfill-repo --repo mini-config --url https://github.com/vcheesbrough/mini-config.git --trunk master --clone-token-stdin$" \
+    && calls | grep -q "^start --attach --interactive cid-mini-config$" \
+    && [ "$(cat "$WORK_DIR/stdin.mini-config")" = "$TOKEN" ] \
+    && calls | grep -q "^create -e CODE_VITALS_DATABASE_URL .* $IMAGE backfill-repo --repo bored --url https://github.com/vcheesbrough/bored.git --trunk main$" \
+    && calls | grep -q "^start --attach cid-bored$" && [ ! -f "$WORK_DIR/stdin.bored" ] \
+    && [ "$(collected)" = "$(printf 'bored\nmini-config')" ]; then
+    pass "private repo: backfilled with the token on its container's stdin; a public one without"
+else
+    fail "private repo: $(out) / calls: $(calls)"
+fi
+
+if ! calls | grep -q "$TOKEN" && ! out | grep -q "$TOKEN" \
+    && ! grep -q "token=$TOKEN" "$WORK_DIR/create-env"; then
+    pass "private repo: the token is on no command line, in no output, and no container's environment"
+else
+    fail "token leaked: $(out) / calls: $(calls) / env: $(cat "$WORK_DIR/create-env")"
+fi
+
+if run dev "$IMAGE" repos; then
+    fail "private repo without a token: expected the step to fail"
+elif out | grep -q "mini-config: ERROR: mini-config is private and CODE_VITALS_CLONE_TOKEN is not set" \
+    && out | grep -q "mini-config: FAILED (exit 1)" && ! out | grep -q "mini-config: skipped" \
+    && ! calls | grep -q "backfill-repo --repo mini-config" \
+    && calls | grep -q "^start --attach cid-bored$"; then
+    pass "private repo without a token: fails loudly, not skipped; the public repos still run"
+else
+    fail "private repo without a token: $(out) / calls: $(calls)"
+fi
+
+printf 'repo bored https://github.com/vcheesbrough/bored.git main secret\n' > "$WORK_DIR/list"
+if run dev "$IMAGE" repos; then
+    fail "unknown access: expected a refusal"
+elif out | grep -q "unexpected repo line" && ! calls | grep -q backfill-repo; then
+    pass "unknown access: refused before any backfill"
+else
+    fail "unknown access: $(out) / calls: $(calls)"
+fi
+
 # --- no registered repo: nothing to backfill, an empty list -------------------
 printf 'code-vitals: telemetry off\n' > "$WORK_DIR/list"
 if run dev "$IMAGE" repos && [ ! -s "$WORK_DIR/repo/.collected-repos" ] \
@@ -144,7 +206,7 @@ else
 fi
 
 # --- a malformed repo line is refused -----------------------------------------
-printf 'repo b$(x) https://example/x.git main\n' > "$WORK_DIR/list"
+printf 'repo b$(x) https://example/x.git main public\n' > "$WORK_DIR/list"
 if run dev "$IMAGE" repos; then
     fail "malformed line: expected a refusal"
 elif out | grep -q "unexpected repo line" && ! calls | grep -q backfill-repo; then

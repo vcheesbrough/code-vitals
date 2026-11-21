@@ -156,9 +156,13 @@ steps:
       - deploy
     image: *docker-image
     volumes: *docker-socket
-    environment: &collect-env
+    environment:
       <<: *registry-creds
       CODE_VITALS_WRITER_PASSWORD: *writer-password
+      # Clones the private repos, on their containers' stdin only (card #602;
+      # README § Measuring a private repo). Public repos are cloned without it.
+      CODE_VITALS_CLONE_TOKEN:
+        from_secret: github_token
     commands:
       - *docker-login
       - ./scripts/run-collector.sh prod "$$(cat .deploy-image)" repos
@@ -172,7 +176,9 @@ steps:
       - collect
     image: *docker-image
     volumes: *docker-socket
-    environment: *collect-env
+    environment:
+      <<: *registry-creds
+      CODE_VITALS_WRITER_PASSWORD: *writer-password
     commands:
       - *docker-login
       - ./scripts/run-collector.sh prod "$$(cat .deploy-image)" status

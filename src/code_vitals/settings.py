@@ -36,8 +36,11 @@ SETTINGS_ENV = "CODE_VITALS_SETTINGS"
 PLUGIN_ENV_PREFIX = "PLUGIN_"
 # Read by the plugin to reach the database; never part of the settings proper.
 WRITER_PASSWORD = "writer_password"
+# A private repo's clone token (card #602), read by the plugin and handed to
+# the collector on stdin; never part of the settings proper either.
+CLONE_TOKEN = "clone_token"
 
-_KEYS = ("trunk", "version_sources", "areas", WRITER_PASSWORD)
+_KEYS = ("trunk", "version_sources", "areas", WRITER_PASSWORD, CLONE_TOKEN)
 # Settings Woodpecker passes JSON-encoded (it encodes every map and every list
 # of maps that way).
 _JSON_KEYS = ("version_sources", "areas")
@@ -82,7 +85,8 @@ class Settings:
 
 
 def parse(settings: Mapping[str, Any]) -> Settings:
-    """Validate a settings mapping (`writer_password`, if present, is ignored)."""
+    """Validate a settings mapping (`writer_password` and `clone_token`, if
+    present, are ignored: they are secrets, not settings)."""
     if not isinstance(settings, Mapping):
         raise SettingsError(f"settings must be a map, not {_kind(settings)}")
     unknown = sorted(str(key) for key in settings if key not in _KEYS)

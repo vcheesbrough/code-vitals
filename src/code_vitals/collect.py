@@ -97,11 +97,14 @@ def collect(
     *,
     measures: Sequence[Measure] | None = None,
     pipeline_number: str | None = None,
+    clone_token: str | None = None,
 ) -> RunResult:
     """Catch the repo up from the clone at `clone_path`, or, when it is None,
-    from a fresh clone of the repo's URL (deleted afterwards). Returns the
-    run's result; raises only for failures that stop the whole run (after
-    recording them on the run row — a failed clone included)."""
+    from a fresh clone of the repo's URL (deleted afterwards), with
+    `clone_token` if it is private. Returns the run's result; raises only for
+    failures that stop the whole run (after recording them on the run row — a
+    failed clone included). Once the clone has succeeded, `repo.private`
+    (unless None) is recorded, so a failed clone never changes it."""
     measures = registered() if measures is None else list(measures)
     started = time.monotonic()
     outcome = obs.Outcome.FAILURE
@@ -117,7 +120,9 @@ def collect(
             run_id = _start_run(conn, repo_id, trigger, build, span)
             try:
                 with contextlib.ExitStack() as fetched:
-                    clone = _open_clone(repo, clone_path, fetched)
+                    clone = _open_clone(repo, clone_path, fetched, clone_token)
+                    if repo.private is not None:
+                        _record_private(conn, repo_id, repo.private)
                     result = _collect_from(
                         conn, clone, repo, repo_id, run_id, measures, trigger, span
                     )
@@ -136,13 +141,24 @@ def collect(
             obs.RUN_DURATION.record(time.monotonic() - started, labels)
 
 
-def _open_clone(repo: RepoConfig, clone_path: Path | None, stack: contextlib.ExitStack) -> Clone:
+def _open_clone(
+    repo: RepoConfig,
+    clone_path: Path | None,
+    stack: contextlib.ExitStack,
+    clone_token: str | None,
+) -> Clone:
     if clone_path is not None:
         return Clone(clone_path)
     if repo.url is None:
         raise ValueError(f"{repo.name} has no URL to fetch from")
     tmp = stack.enter_context(tempfile.TemporaryDirectory(prefix="code-vitals-clone-"))
-    return clone_from(repo.url, Path(tmp) / repo.name)
+    return clone_from(repo.url, Path(tmp) / repo.name, clone_token)
+
+
+def _record_private(conn: Conn, repo_id: int, private: bool) -> None:
+    """Whether a deployment needs a clone token for this repo (migration 0008)."""
+    with obs.db_span("UPDATE", "repo private"):
+        conn.execute("UPDATE repo SET private = %s WHERE id = %s", (private, repo_id))
 
 
 def _collect_from(

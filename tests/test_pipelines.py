@@ -321,3 +321,18 @@ def test_this_repo_has_no_operations_or_suite_rules() -> None:
     # in those measures' sense. Adding rules is a measure version bump.
     assert "code-vitals" not in OPERATIONS
     assert "code-vitals" not in SUITES
+
+
+@pytest.mark.parametrize("env", ["dev", "prod"])
+def test_only_the_collect_step_gets_the_clone_token(env: str) -> None:
+    # Private repos are cloned with the broker's shared github_token (card
+    # #602); scripts/run-collector.sh hands it to their containers on stdin.
+    steps = _workflow(f"deploy-{env}.yml")["steps"]
+    assert steps["collect"]["environment"]["CODE_VITALS_CLONE_TOKEN"] == {
+        "from_secret": "github_token"
+    }
+    assert "CODE_VITALS_CLONE_TOKEN" not in steps["check"]["environment"]
+    holders = [
+        n for n, s in steps.items() if "CODE_VITALS_CLONE_TOKEN" in (s.get("environment") or {})
+    ]
+    assert holders == ["collect"]

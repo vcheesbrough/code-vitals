@@ -30,11 +30,19 @@ show — only then, so it counts again exactly when it has every version it
 missed (a clean run of an older build, which lacks a newer current version,
 leaves it skipped).
 
+A repo that is gone (deleted, or moved without its URL re-pointed) fails its
+clone, which fails a deployment exactly as a forge outage does, so it is never
+skipped automatically. The owner *retires* it (`repo.retired_at`, retire_repo):
+it is skipped too, and deployments stop cloning it. The first run that clones
+it from its URL again clears the mark (it exists after all), leaving a skipped
+repo that the rule above makes active again.
+
 A run row exists from the moment the repo is known, so every failure after
 that — a bad clone, a changed measure definition — is recorded too.
 """
 
 import contextlib
+import dataclasses
 import logging
 import tempfile
 import time
@@ -86,6 +94,8 @@ class RunResult:
     backlog: int
     commits_measured: int
     commits_failed: int
+    # The repo was retired, and this run's clone of its URL brought it back.
+    unretired: bool = False
 
 
 def collect(
@@ -121,11 +131,14 @@ def collect(
             try:
                 with contextlib.ExitStack() as fetched:
                     clone = _open_clone(repo, clone_path, fetched, clone_token)
+                    unretired = clone_path is None and _unretire_on_clone(conn, repo_id)
                     if repo.private is not None:
                         _record_private(conn, repo_id, repo.private)
                     result = _collect_from(
                         conn, clone, repo, repo_id, run_id, measures, trigger, span
                     )
+                    if unretired:
+                        result = dataclasses.replace(result, unretired=True)
             except Exception:
                 log.exception("collect failed for %s", repo.name)
                 _finish_run(conn, run_id, obs.Outcome.FAILURE, 0)
@@ -159,6 +172,26 @@ def _record_private(conn: Conn, repo_id: int, private: bool) -> None:
     """Whether a deployment needs a clone token for this repo (migration 0008)."""
     with obs.db_span("UPDATE", "repo private"):
         conn.execute("UPDATE repo SET private = %s WHERE id = %s", (private, repo_id))
+
+
+def _unretire_on_clone(conn: Conn, repo_id: int) -> bool:
+    """A retired repo that was just cloned from its URL is not gone: its own
+    plugin step is running. Deployments clone it again from now on; it stays
+    skipped until a run catches it up (_complete_backfill). Returns whether it
+    was retired."""
+    with obs.db_span("UPDATE", "unretire repo"):
+        back = conn.execute(
+            "UPDATE repo SET retired_at = NULL WHERE id = %s AND retired_at IS NOT NULL"
+            " RETURNING name",
+            (repo_id,),
+        ).fetchone()
+    if back is not None:
+        log.info(
+            "%s was retired but cloned from its URL again; deployments re-measure it",
+            back[0],
+            extra={obs.REPO: back[0]},
+        )
+    return back is not None
 
 
 def _collect_from(
@@ -572,6 +605,9 @@ def _complete_backfill(
     with obs.db_span("UPDATE", "reactivate repo"):
         returned = conn.execute(
             "UPDATE repo r SET skipped_at = NULL WHERE r.id = %s AND r.skipped_at IS NOT NULL"
+            # A retired repo stays skipped (repo_retired_is_skipped): a run from a
+            # local clone does not show that its URL works again.
+            " AND r.retired_at IS NULL"
             # The newest complete version of each measure, as the current_measure
             # view has it (the writer reads the tables, not the views).
             " AND NOT EXISTS (SELECT 1 FROM measure m WHERE m.status = 'complete'"
@@ -632,6 +668,72 @@ def skip_repo(conninfo: str, name: str) -> bool:
             extra={obs.REPO: name},
         )
     return newly is not None
+
+
+class RepoNotRegistered(LookupError):
+    pass
+
+
+@dataclass(frozen=True)
+class Retirement:
+    # When the repo was retired: now, or the earlier retirement that is kept.
+    retired_at: datetime
+    newly: bool
+
+
+def retire_repo(conninfo: str, name: str) -> Retirement:
+    """Retire a registered repo that is gone (the owner's decision, card #586):
+    deployments stop cloning it (list-repos leaves it out), and it is skipped,
+    so it stops counting toward completing a measure version — every
+    backfilling version that waited only for it completes now, as in
+    skip_repo. Its rows stay, and stay visible, frozen (migration 0007). The
+    first retirement's time is kept. Raises RepoNotRegistered."""
+    with psycopg.connect(conninfo, autocommit=True) as conn:
+        with obs.db_span("UPDATE", "retire repo"):
+            row = conn.execute(
+                "UPDATE repo SET retired_at = now(), skipped_at = COALESCE(skipped_at, now())"
+                " WHERE name = %s AND retired_at IS NULL RETURNING retired_at",
+                (name,),
+            ).fetchone()
+        if row is None:
+            with obs.db_span("SELECT", "retired repo"):
+                row = conn.execute(
+                    "SELECT retired_at FROM repo WHERE name = %s", (name,)
+                ).fetchone()
+            if row is None:
+                raise RepoNotRegistered(f"no repo named {name} is registered")
+            assert isinstance(row[0], datetime)
+            return Retirement(row[0], newly=False)
+        _complete_measures(conn, None)
+    assert isinstance(row[0], datetime)
+    log.info(
+        "%s is retired: deployments no longer clone it, and its recorded history stays as"
+        " it is until a run clones it from its URL again",
+        name,
+        extra={obs.REPO: name},
+    )
+    return Retirement(row[0], newly=True)
+
+
+def unretire_repo(conninfo: str, name: str) -> bool:
+    """Undo retire_repo: deployments clone the repo again (and fail while it is
+    still gone). It stays skipped until a run catches it up. Returns whether it
+    was retired. Raises RepoNotRegistered."""
+    with psycopg.connect(conninfo, autocommit=True) as conn:
+        with obs.db_span("UPDATE", "unretire repo"):
+            back = conn.execute(
+                "UPDATE repo SET retired_at = NULL WHERE name = %s AND retired_at IS NOT NULL"
+                " RETURNING id",
+                (name,),
+            ).fetchone()
+        if back is None:
+            with obs.db_span("SELECT", "retired repo"):
+                known = conn.execute("SELECT 1 FROM repo WHERE name = %s", (name,)).fetchone()
+            if known is None:
+                raise RepoNotRegistered(f"no repo named {name} is registered")
+            return False
+    log.info("%s is no longer retired: deployments clone it again", name, extra={obs.REPO: name})
+    return True
 
 
 def _iteration_at(clone: Clone, repo: RepoConfig, sha: str) -> int | None:

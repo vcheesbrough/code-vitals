@@ -136,6 +136,30 @@ def test_freshness_says_which_repos_are_skipped(db: str) -> None:
     assert rows == [("bored", False), ("v-note", True)]
 
 
+def test_freshness_says_which_repos_are_retired(db: str) -> None:
+    _seed(db)
+    with psycopg.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO repo (id, name, trunk, skipped_at, retired_at)"
+            " VALUES (2, 'gone', 'main', '2026-11-19T12:00Z', '2026-11-20T12:00Z')"
+        )
+        rows = conn.execute(
+            "SELECT repo, skipped_at IS NOT NULL, retired_at IS NOT NULL FROM freshness"
+            " ORDER BY repo"
+        ).fetchall()
+    assert rows == [("bored", False, False), ("gone", True, True)]
+
+
+def test_a_retired_repo_is_always_skipped(db: str) -> None:
+    # Retiring builds on skipping: the views and completion read skipped_at only.
+    _seed(db)
+    with (
+        psycopg.connect(db) as conn,
+        pytest.raises(psycopg.errors.CheckViolation, match="repo_retired_is_skipped"),
+    ):
+        conn.execute("UPDATE repo SET retired_at = now()")
+
+
 def test_a_skipped_repo_shows_the_newest_complete_version_it_backfilled(db: str) -> None:
     _seed(db)
     with psycopg.connect(db) as conn:

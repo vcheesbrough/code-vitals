@@ -10,7 +10,7 @@
   Non-recomputable measures are not in the table (fixed_value_measures).
 - check_status, once every repo is collected: every version this build
   registers is `complete` (so the views show it), and the last run of every
-  repo collected succeeded. Skipped repos do not hold a version back
+  repo collected succeeded. Skipped (and retired) repos do not hold a version back
   (collect.skip_repo); when every registered repo is skipped nothing can
   backfill a version, so the versions are not checked.
 """
@@ -284,7 +284,7 @@ def check_status(
             # Nothing was collected, so nothing could register or backfill a
             # version; the views keep what they had.
             log.warning(
-                "no registered repo is active (all skipped, or none registered):"
+                "no registered repo is active (all skipped or retired, or none registered):"
                 " measure versions not checked"
             )
         for name in repos:

@@ -1,6 +1,7 @@
 """A deployment's backfill over the registered repos, against a real database
 and fixture repositories whose own workflow file holds their settings."""
 
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -13,7 +14,7 @@ from code_vitals import collect as collect_module
 from code_vitals.backfill import Outcome, RegisteredRepo, backfill_repo, registered_repos
 from code_vitals.build_info import BuildInfo
 from code_vitals.db.migrate import bundled_migrations, migrate
-from code_vitals.gitrepo import Clone
+from code_vitals.gitrepo import Clone, GitError
 from code_vitals.measures import Measure
 from code_vitals.measures.files import Files
 from code_vitals.obs import Trigger
@@ -218,6 +219,83 @@ def test_cli_lists_repos_for_the_deploy_script(
     assert not any(line.startswith("repo old") for line in out)
     # No deployment can clone it, so it must not hold a measure version back.
     assert _rows(owner, "SELECT name FROM repo WHERE skipped_at IS NOT NULL") == [("old",)]
+
+
+def test_a_gone_repo_fails_every_deployment_until_it_is_retired(
+    db: tuple[str, str], repo: FixtureRepo, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Card #586, through the deployment's own steps: list-repos, backfill
+    every repo it lists, then check-status."""
+    owner, writer = db
+    (tmp_path / "gone").mkdir()
+    gone = three_commit_history(tmp_path / "gone")
+    gone.commit("Measure me", {WORKFLOW_PATH: WORKFLOW})
+    v1: list[Measure] = [Files()]
+    v2: list[Measure] = [FilesV2()]
+    for name, fixture in (("fixture", repo), ("gone", gone)):
+        collect_module.collect(
+            writer,
+            RepoConfig(name, "main", (), url=str(fixture.path)),
+            fixture.path,
+            Trigger.PUSH,
+            BUILD,
+            measures=v1,
+        )
+
+    def deploy() -> list[str]:
+        """The repos the deployment collected (its .collected-repos)."""
+        assert cli.main(["list-repos"], {cli.DATABASE_URL_ENV: writer}) == 0
+        listed = [
+            line.split()[1]
+            for line in capsys.readouterr().out.splitlines()
+            if line.startswith("repo ")
+        ]
+        for name in listed:
+            url = {"fixture": repo.path, "gone": gone.path}[name]
+            backfill_repo(writer, RegisteredRepo(name, str(url), "main"), BUILD, measures=v2)
+        return listed
+
+    # The repo is deleted. Its clone fails exactly as an outage's would, so
+    # the deployment fails, and nothing marks it skipped.
+    shutil.rmtree(gone.path)
+    with pytest.raises(GitError, match="git clone of"):
+        deploy()
+    assert _rows(owner, "SELECT count(*) FROM repo WHERE skipped_at IS NOT NULL") == [(0,)]
+    assert checks.check_status(writer, ["fixture", "gone"], measures=v2) != []
+
+    # The owner retires it: the next deployment leaves it out and passes.
+    collect_module.retire_repo(writer, "gone")
+    assert deploy() == ["fixture"]
+    assert checks.check_status(writer, ["fixture"], measures=v2) == []
+    assert _rows(owner, "SELECT version, status::text FROM measure ORDER BY version") == [
+        (1, "complete"),
+        (2, "complete"),
+    ]
+    # Its history stays visible, frozen, and freshness says it is retired.
+    assert _rows(
+        owner, "SELECT DISTINCT repo, measure_version FROM current_measurement ORDER BY repo"
+    ) == [("fixture", 2), ("gone", 1)]
+    assert _rows(owner, "SELECT repo, retired_at IS NOT NULL FROM freshness ORDER BY repo") == [
+        ("fixture", False),
+        ("gone", True),
+    ]
+
+
+def test_cli_lists_a_retired_repo_without_its_url(
+    db: tuple[str, str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    owner, writer = db
+    _registered(owner, ("v-note", "https://x/v.git", "master"), ("gone", "https://x/g.git", "main"))
+    collect_module.retire_repo(writer, "gone")
+    assert registered_repos(writer)[0] == RegisteredRepo(
+        "gone", "https://x/g.git", "main", retired=True
+    )
+    assert cli.main(["list-repos"], {cli.DATABASE_URL_ENV: writer}) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert "code-vitals list-repos: gone is retired; deployments skip it" in out
+    assert [line for line in out if line.startswith("repo ")] == [
+        "repo v-note https://x/v.git master public"
+    ]
 
 
 @pytest.fixture

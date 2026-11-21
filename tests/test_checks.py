@@ -17,7 +17,7 @@ from code_vitals.checks import (
     load_expected,
     render,
 )
-from code_vitals.collect import collect, skip_repo
+from code_vitals.collect import collect, retire_repo, skip_repo
 from code_vitals.db.migrate import migrate
 from code_vitals.measures import Measure, registered
 from code_vitals.measures.files import Files
@@ -308,6 +308,25 @@ def test_status_does_not_check_versions_when_no_repo_is_active(
     caplog.clear()
     assert check_status(writer, [], measures=[Empty()]) == []
     assert "no registered repo is active" in caplog.text
+
+
+def test_status_with_a_retired_repo(
+    db: tuple[str, str], repo: FixtureRepo, caplog: pytest.LogCaptureFixture
+) -> None:
+    # A retired repo is not named (the deployment did not clone it), and it
+    # does not count as active: with only it registered the versions are not
+    # checked, as when every repo is skipped.
+    owner, writer = db
+    _collected(writer, repo)
+    with psycopg.connect(owner) as conn:
+        conn.execute(
+            "INSERT INTO run (repo_id, trigger, collector_version, collector_revision, outcome)"
+            " SELECT id, 'backfill', '0.17.1', 'def', 'failure' FROM repo"
+        )
+    retire_repo(writer, "fixture")
+    caplog.clear()
+    assert check_status(writer, [], measures=[Empty()]) == []
+    assert "no registered repo is active (all skipped or retired" in caplog.text
 
 
 def test_the_bundled_table_covers_every_repo_and_measure_this_build_has() -> None:
